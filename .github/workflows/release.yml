@@ -1,0 +1,100 @@
+name: Release
+
+# v1.2.3 형태의 태그를 밀면 패키지 zip 을 만들어 GitHub Release 로 올립니다.
+# package.json 의 version 과 태그가 다르면 실패시켜 사고를 막습니다.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 태그와 package.json 버전 대조
+        id: pkg
+        run: |
+          set -euo pipefail
+
+          name=$(python3 -c 'import json;print(json.load(open("package.json"))["name"])')
+          version=$(python3 -c 'import json;print(json.load(open("package.json"))["version"])')
+          tag_version="${GITHUB_REF_NAME#v}"
+
+          if [ "$tag_version" != "$version" ]; then
+            echo "::error::태그 ${GITHUB_REF_NAME} 와 package.json 의 version ${version} 이 다릅니다. 둘을 맞춘 뒤 태그를 다시 미세요."
+            exit 1
+          fi
+
+          {
+            echo "name=${name}"
+            echo "version=${version}"
+            echo "zip_name=${name}-${version}.zip"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 패키지 zip 만들기
+        run: |
+          set -euo pipefail
+
+          zip_path="${RUNNER_TEMP}/${{ steps.pkg.outputs.zip_name }}"
+
+          # package.json 이 zip 최상단에 오도록 저장소 루트의 내용을 그대로 담습니다. (VPM 규칙)
+          # "zip -r . " 는 항목 이름에 ./ 가 붙을 수 있어, 담을 대상을 명시적으로 넘깁니다.
+          # 최상위 dot 파일/폴더(.git, .github ...)는 패키지 내용이 아니므로 제외합니다.
+          mapfile -t entries < <(ls -A | grep -v '^\.')
+          echo "담을 항목: ${entries[*]}"
+
+          zip -r -q "$zip_path" "${entries[@]}"
+
+          echo "ZIP_PATH=${zip_path}" >> "$GITHUB_ENV"
+
+          echo "== zip 내용 =="
+          unzip -Z1 "$zip_path"
+
+          # package.json 이 최상단에 없으면 VCC 가 패키지로 인식하지 못합니다.
+          if ! unzip -Z1 "$zip_path" | sed 's|^\./||' | grep -qx 'package.json'; then
+            echo "::error::zip 최상단에 package.json 이 없습니다."
+            exit 1
+          fi
+
+          # .meta 가 빠지면 사용자 Scene 의 스크립트 참조가 깨집니다.
+          missing=0
+          while IFS= read -r asset; do
+            case "$asset" in
+              */) continue ;;
+              *.meta) continue ;;
+            esac
+            if ! unzip -Z1 "$zip_path" | grep -qx "${asset}.meta"; then
+              echo "::error::${asset} 의 .meta 가 없습니다."
+              missing=1
+            fi
+          done < <(unzip -Z1 "$zip_path" | sed 's|^\./||')
+
+          [ "$missing" -eq 0 ] || exit 1
+
+      - name: 리스팅용 package.json 만들기 (다운로드 URL + 체크섬 주입)
+        run: |
+          set -euo pipefail
+
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${{ steps.pkg.outputs.zip_name }}"
+
+          python3 .github/scripts/release_info.py \
+            package.json "$ZIP_PATH" "$url" "${RUNNER_TEMP}/package.json"
+
+          echo "PKG_JSON=${RUNNER_TEMP}/package.json" >> "$GITHUB_ENV"
+
+      - name: 릴리즈 생성
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh release create "$GITHUB_REF_NAME" \
+            --title "${{ steps.pkg.outputs.name }} ${{ steps.pkg.outputs.version }}" \
+            --generate-notes \
+            "$ZIP_PATH" "$PKG_JSON"

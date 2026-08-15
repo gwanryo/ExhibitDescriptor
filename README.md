@@ -5,10 +5,28 @@ Local Only · 다중 Overlay 동시 표시 · KR/EN/JP 다국어 · 100개 이�
 
 ---
 
+## 설치
+
+**VCC (권장)**
+
+1. [저장소 추가 페이지](https://gwanryo.github.io/ExhibitDescriptor/) 에서 *VCC 에 저장소 추가* 를 누릅니다.
+   (또는 VCC 의 `Settings > Packages > Add Repository` 에 `https://gwanryo.github.io/ExhibitDescriptor/index.json` 을 직접 입력)
+2. World 프로젝트를 열고 `Manage Project` 에서 **Exhibit Descriptor** 를 `+` 로 추가합니다.
+
+VRChat Worlds SDK 3.10.4 이상이 함께 필요하며, VCC 가 자동으로 잡아 줍니다.
+
+**수동 설치**
+
+[Releases](https://github.com/gwanryo/ExhibitDescriptor/releases) 에서 zip 을 받아
+프로젝트의 `Packages/com.gwanryo.exhibit-descriptor/` 에 풀어 넣습니다.
+
+---
+
 ## 0. 포함된 파일
 
 ```
-Assets/ExhibitDescriptor/
+Packages/com.gwanryo.exhibit-descriptor/
+├─ package.json
 ├─ Runtime/
 │  ├─ ExhibitEnums.cs              // ExhibitLanguage, ExhibitButtonAction
 │  ├─ ExhibitManager.cs            // Scene 당 1개. 언어 상태 + 단일 Update 틱
@@ -16,10 +34,12 @@ Assets/ExhibitDescriptor/
 │  ├─ ExhibitInteractRelay.cs      // Collider 와 같은 GameObject 에서 Interact 판정
 │  ├─ ExhibitOverlay.cs            // 작품별 Overlay. Fade+Scale, 스크롤
 │  ├─ ExhibitOverlayButton.cs      // Close / ScrollUp / ScrollDown 버튼
-│  └─ ExhibitLanguageSwitch.cs     // 월드용 언어 전환 버튼 (선택)
+│  ├─ ExhibitLanguageSwitch.cs     // 월드용 언어 전환 버튼 (선택)
+│  └─ ExhibitDescriptor.asmdef     // 런타임 어셈블리 정의
 ├─ Editor/
-│  ├─ ExhibitDescriptorTools.cs      // 자동 생성 / 자동 연결 / 검증 도구
-│  └─ ExhibitDescriptorBatchTools.cs // Mesh 일괄 변환 / 저장 시 자동 Setup
+│  ├─ ExhibitDescriptorTools.cs         // 자동 생성 / 자동 연결 / 검증 도구
+│  ├─ ExhibitDescriptorBatchTools.cs    // Mesh 일괄 변환 / 저장 시 자동 Setup
+│  └─ ExhibitDescriptor.Editor.asmdef   // 에디터 어셈블리 정의
 ├─ QUICKSTART.md                     // 처음 쓰는 사람용 1장 요약
 └─ README.md
 ```

@@ -1,0 +1,109 @@
+name: VPM Listing
+
+# 릴리즈가 올라올 때마다 모든 릴리즈를 모아 VCC 용 index.json 을 만들고
+# GitHub Pages 로 배포합니다. 사용자는 저장소 URL 하나만 VCC 에 추가하면 됩니다.
+#
+# 최초 1회 수동 설정: Settings > Pages > Source 를 "GitHub Actions" 로 바꿔야 합니다.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 리스팅 주소 계산
+        id: urls
+        run: |
+          set -euo pipefail
+
+          owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          repo="${GITHUB_REPOSITORY#*/}"
+          page="https://${owner}.github.io/${repo}"
+
+          {
+            echo "page=${page}"
+            echo "index=${page}/index.json"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 릴리즈에 첨부된 package.json 내려받기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p _site manifests
+
+          # 각 릴리즈의 package.json 에는 release.yml 이 url / zipSHA256 을 이미 넣어 두었습니다.
+          gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+            --jq '.[] | select(.draft == false) | .assets[] | select(.name == "package.json") | [.browser_download_url, (.url | split("/") | .[-2])] | @tsv' \
+            > assets.tsv || true
+
+          count=0
+          while IFS=$'\t' read -r url asset_id; do
+            [ -z "${url:-}" ] && continue
+            curl -fsSL "$url" -o "manifests/${asset_id}.json"
+            count=$((count + 1))
+          done < assets.tsv
+
+          echo "내려받은 package.json: ${count} 개"
+
+      - name: index.json 생성
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          python3 .github/scripts/build_listing.py \
+            "${{ steps.urls.outputs.index }}" _site/index.json manifests/*.json
+
+      - name: 안내 페이지 만들기
+        env:
+          INDEX_URL: ${{ steps.urls.outputs.index }}
+        run: |
+          set -euo pipefail
+
+          cat > _site/index.html <<HTML
+          <!doctype html>
+          <html lang="ko">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Exhibit Descriptor - VPM Listing</title>
+            <style>
+              body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.7; }
+              code { background: #eee; padding: .15rem .4rem; border-radius: .25rem; word-break: break-all; }
+              a.button { display: inline-block; background: #1b7; color: #fff; padding: .6rem 1.2rem; border-radius: .4rem; text-decoration: none; }
+            </style>
+          </head>
+          <body>
+            <h1>Exhibit Descriptor</h1>
+            <p>VRChat 전시 설명 시스템 (UdonSharp) 의 VPM 저장소입니다.</p>
+            <p><a class="button" href="vcc://vpm/addRepo?url=${INDEX_URL}">VCC 에 저장소 추가</a></p>
+            <p>버튼이 동작하지 않으면 VCC 의 <em>Settings &gt; Packages &gt; Add Repository</em> 에 아래 주소를 직접 넣으세요.</p>
+            <p><code>${INDEX_URL}</code></p>
+          </body>
+          </html>
+          HTML
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
