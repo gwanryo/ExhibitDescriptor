@@ -31,12 +31,25 @@ jobs:
 
       - name: 리스팅 주소 계산
         id: urls
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
-          repo="${GITHUB_REPOSITORY#*/}"
-          page="https://${owner}.github.io/${repo}"
+          # 커스텀 도메인을 쓰면 <owner>.github.io/<repo> 가 실제 주소가 아닙니다.
+          # Pages 가 알려 주는 주소를 그대로 씁니다. (없으면 기본 주소로 폴백)
+          page=$(gh api "repos/${GITHUB_REPOSITORY}/pages" --jq '.html_url' 2>/dev/null || true)
+
+          if [ -z "$page" ] || [ "$page" = "null" ]; then
+            owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+            page="https://${owner}.github.io/${GITHUB_REPOSITORY#*/}"
+            echo "Pages 주소를 못 읽어 기본값을 씁니다: ${page}"
+          fi
+
+          page="https://${page#*://}"   # VCC 가 받아갈 주소이므로 https 로 고정
+          page="${page%/}"              # 끝의 / 제거
+
+          echo "리스팅 주소: ${page}/index.json"
 
           {
             echo "page=${page}"

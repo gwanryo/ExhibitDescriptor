@@ -9,8 +9,8 @@ Local Only · 다중 Overlay 동시 표시 · KR/EN/JP 다국어 · 100개 이�
 
 **VCC (권장)**
 
-1. [저장소 추가 페이지](https://gwanryo.github.io/ExhibitDescriptor/) 에서 *VCC 에 저장소 추가* 를 누릅니다.
-   (또는 VCC 의 `Settings > Packages > Add Repository` 에 `https://gwanryo.github.io/ExhibitDescriptor/index.json` 을 직접 입력)
+1. [저장소 추가 페이지](https://rwe.kr/ExhibitDescriptor/) 에서 *VCC 에 저장소 추가* 를 누릅니다.
+   (또는 VCC 의 `Settings > Packages > Add Repository` 에 `https://rwe.kr/ExhibitDescriptor/index.json` 을 직접 입력)
 2. World 프로젝트를 열고 `Manage Project` 에서 **Exhibit Descriptor** 를 `+` 로 추가합니다.
 
 VRChat Worlds SDK 3.10.4 이상이 함께 필요하며, VCC 가 자동으로 잡아 줍니다.
