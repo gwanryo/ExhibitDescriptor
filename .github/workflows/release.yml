@@ -98,3 +98,13 @@ jobs:
             --title "${{ steps.pkg.outputs.name }} ${{ steps.pkg.outputs.version }}" \
             --generate-notes \
             "$ZIP_PATH" "$PKG_JSON"
+
+  # 릴리즈를 만든 뒤 VCC 리스팅을 다시 배포합니다.
+  # GITHUB_TOKEN 이 만든 릴리즈는 release 이벤트를 일으키지 않으므로 직접 호출합니다.
+  listing:
+    needs: release
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/listing.yml

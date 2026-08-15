@@ -4,7 +4,13 @@ name: VPM Listing
 # GitHub Pages 로 배포합니다. 사용자는 저장소 URL 하나만 VCC 에 추가하면 됩니다.
 #
 # 최초 1회 수동 설정: Settings > Pages > Source 를 "GitHub Actions" 로 바꿔야 합니다.
+#
+# release.yml 이 만든 릴리즈로는 이 워크플로가 저절로 돌지 않습니다.
+# GitHub 는 기본 GITHUB_TOKEN 이 일으킨 이벤트로 다른 워크플로를 트리거하지 않기 때문입니다.
+# 그래서 release.yml 이 workflow_call 로 직접 부릅니다.
+# (웹 UI 에서 손으로 릴리즈를 만든 경우에는 release 트리거가 정상 동작합니다)
 on:
+  workflow_call:
   release:
     types: [published]
   workflow_dispatch:
