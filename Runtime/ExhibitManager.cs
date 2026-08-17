@@ -37,6 +37,44 @@ public class ExhibitManager : UdonSharpBehaviour
     [Tooltip("Editor Tool 이 '작품별 Proximity' 를 일괄 적용할 때 사용할 기본값(m).")]
     [Min(0.1f)] public float defaultProximity = 2f;
 
+    // ---------------------------------------------------------------------
+    // Info Icon (응시형 ⓘ 아이콘) - 전시 전체 기본값
+    //
+    // 작품이 매 프레임 읽으므로 public 필드입니다. (defaultInteractionTextKR 과 같은 이유)
+    // 작품에서 override 를 켜지 않으면 여기 값이 그대로 쓰이므로, 전시 전체 배치를
+    // 필드 하나 수정으로 바꿀 수 있습니다.
+    // ---------------------------------------------------------------------
+
+    [Header("Info Icon Defaults")]
+    [Tooltip("작품이 Default 로 두었을 때 쓰는 아이콘 방향입니다.")]
+    public ExhibitIconPlacement defaultIconPlacement = ExhibitIconPlacement.Right;
+
+    [Tooltip("작품 가장자리와 아이콘 사이 여백(m).")]
+    [Min(0f)] public float defaultIconGap = 0.15f;
+
+    [Tooltip("아이콘 높이 보정(m, 월드 Y). 음수도 정상 값입니다.")]
+    public float defaultIconHeightOffset = 0f;
+
+    [Tooltip("아이콘 한 변의 길이(m). 이 값은 Editor 의 Setup 이 아이콘 Scale/Collider 에 구워 넣습니다.")]
+    [Min(0.01f)] public float defaultIconSize = 0.08f;
+
+    [Tooltip("이 거리(m) 밖에서는 아이콘이 뜨지 않습니다.")]
+    [Min(0.5f)] public float defaultGazeDistance = 6f;
+
+    [Header("Gaze")]
+    [Tooltip("아이콘이 '나타나는' 시선 각도(도). 작품 중심이 이 안에 들어와야 합니다.")]
+    [Range(1f, 89f)] [SerializeField] private float gazeEnterAngle = 25f;
+
+    [Tooltip("아이콘이 '유지되는' 시선 각도(도). 아이콘을 조준하려 고개를 돌려도 사라지지 않도록 " +
+             "나타나는 조건보다 넓게 둡니다.")]
+    [Range(1f, 89f)] [SerializeField] private float gazeExitAngle = 45f;
+
+    [Tooltip("아이콘 페이드 시간(초).")]
+    [Min(0f)] public float iconFadeDuration = 0.12f;
+
+    [Tooltip("프레임당 근접 스캔 개수. 작품 100개면 한 바퀴에 약 13프레임(0.2초)입니다.")]
+    [Min(1)] [SerializeField] private int iconScanPerFrame = 8;
+
     // Overlay 폰트 슬롯(TMP_FontAsset)은 이 컴포넌트가 아니라 같은 GameObject 의
     // ExhibitDescriptorSettings(평범한 MonoBehaviour) 에 있습니다. 여기에 둘 수 없는 이유는
     // ExhibitDescriptorSettings 의 주석에 적어 두었습니다. (요약: Udon 타입 화이트리스트)
@@ -64,6 +102,21 @@ public class ExhibitManager : UdonSharpBehaviour
     private ExhibitOverlay[] _ticks;
     private int _tickCount;
 
+    // 근접 범위 안에 있어 매 프레임 시선 판정을 하는 작품 목록 (보통 0 ~ 2개)
+    private ExhibitInteractable[] _near;
+    private int _nearCount;
+
+    // 라운드로빈 스캔 커서. _exhibits 는 스왑 제거 방식이라 순서가 바뀔 수 있지만,
+    // 커서가 어긋나도 다음 사이클에 다시 훑으므로 문제되지 않습니다.
+    private int _scanCursor;
+
+    // 시선 각도의 cos 캐시. Acos 을 매 프레임 부르지 않기 위한 것으로,
+    // 인스펙터 값이 바뀔 때만 다시 계산합니다.
+    private float _cosGazeEnter;
+    private float _cosGazeExit;
+    private float _cachedEnterAngle = -1f;
+    private float _cachedExitAngle = -1f;
+
     // ---------------------------------------------------------------------
     // Unity / Udon Events
     // ---------------------------------------------------------------------
@@ -74,6 +127,13 @@ public class ExhibitManager : UdonSharpBehaviour
     }
 
     void Update()
+    {
+        _TickOverlays();
+        _TickIcons();
+    }
+
+    /// <summary>Overlay 애니메이션 / 스크롤. 애니메이션 중인 Overlay 가 없으면 즉시 끝납니다.</summary>
+    private void _TickOverlays()
     {
         // 애니메이션 중인 Overlay 가 없으면 아무 것도 하지 않습니다.
         if (_tickCount <= 0) return;
@@ -103,6 +163,149 @@ public class ExhibitManager : UdonSharpBehaviour
                 if (i < _tickCount && _ticks[i] == overlay) _RemoveTickAt(i);
             }
         }
+    }
+
+    /// <summary>
+    /// 응시형 아이콘. 2단계로 나눠 유휴 비용을 거리 검사 <see cref="iconScanPerFrame"/> 회로 묶습니다.
+    ///
+    ///  1) 근접 스캔 (라운드로빈): 작품 100개면 한 바퀴 약 13프레임(0.2초)
+    ///  2) 시선 판정: _near 목록만, 매 프레임 (보통 0 ~ 2개)
+    ///
+    /// 트리거 콜라이더를 100개 추가하지 않으므로 물리 비용은 0 이고, ClientSim 에서
+    /// 결정적으로 재현됩니다. <see cref="ExhibitInfoIcon"/> 이 없는 레거시 작품은
+    /// 스캔 대상에서 제외합니다.
+    /// </summary>
+    private void _TickIcons()
+    {
+        if (_exhibitCount <= 0 && _nearCount <= 0) return;
+
+        VRCPlayerApi player = Networking.LocalPlayer;
+        if (!Utilities.IsValid(player)) return;
+
+        // 머리를 한 번만 읽어 모든 작품이 공유합니다. 시선 판정에 어차피 필요한 값이라
+        // 아이콘 배치의 부호(side)를 정하는 비용은 공짜입니다.
+        VRCPlayerApi.TrackingData head = player.GetTrackingData(VRCPlayerApi.TrackingDataType.Head);
+        Vector3 headPosition = head.position;
+        Vector3 headForward = head.rotation * Vector3.forward;
+
+        _RefreshGazeCos();
+        _ScanNear(headPosition);
+
+        float deltaTime = Time.deltaTime;
+
+        // 역순 순회: 순회 중 제거되어도 안전합니다.
+        for (int i = _nearCount - 1; i >= 0; i--)
+        {
+            if (i >= _nearCount) continue;
+
+            ExhibitInteractable exhibit = _near[i];
+
+            if (!Utilities.IsValid(exhibit))
+            {
+                _RemoveNearAt(i);
+                continue;
+            }
+
+            if (!exhibit.gameObject.activeInHierarchy)
+            {
+                _RemoveNearAt(i);
+                continue;
+            }
+
+            exhibit._TickIcon(headPosition, headForward, deltaTime, _cosGazeEnter, _cosGazeExit);
+        }
+    }
+
+    /// <summary>각도 → cos 변환은 설정이 바뀔 때만 합니다. (매 프레임 Cos 호출 회피)</summary>
+    private void _RefreshGazeCos()
+    {
+        if (gazeEnterAngle != _cachedEnterAngle)
+        {
+            _cachedEnterAngle = gazeEnterAngle;
+            _cosGazeEnter = Mathf.Cos(gazeEnterAngle * Mathf.Deg2Rad);
+        }
+
+        if (gazeExitAngle != _cachedExitAngle)
+        {
+            _cachedExitAngle = gazeExitAngle;
+            _cosGazeExit = Mathf.Cos(gazeExitAngle * Mathf.Deg2Rad);
+        }
+    }
+
+    /// <summary>_exhibits 를 커서로 돌며 근접 목록을 갱신합니다. 프레임당 iconScanPerFrame 개.</summary>
+    private void _ScanNear(Vector3 headPosition)
+    {
+        if (_exhibitCount <= 0) return;
+
+        int budget = iconScanPerFrame;
+        if (budget < 1) budget = 1;
+        if (budget > _exhibitCount) budget = _exhibitCount;
+
+        for (int n = 0; n < budget; n++)
+        {
+            if (_scanCursor >= _exhibitCount) _scanCursor = 0;
+
+            ExhibitInteractable exhibit = _exhibits[_scanCursor];
+            _scanCursor++;
+
+            if (!Utilities.IsValid(exhibit)) continue;
+            if (!exhibit.gameObject.activeInHierarchy) continue;
+            if (!exhibit._HasInfoIcon()) continue;      // 레거시 작품은 대상이 아닙니다.
+
+            float range = exhibit._GetGazeDistance();
+            Vector3 toExhibit = exhibit._GetIconCenter() - headPosition;
+
+            // Overlay 를 읽는 중이라면 거리를 벗어나도 유지합니다.
+            // (Panel 만 남고 아이콘이 사라지는 어긋난 상태를 막습니다)
+            bool near = toExhibit.sqrMagnitude <= range * range || exhibit._IsOverlayOpen();
+
+            if (near) _AddNear(exhibit);
+            else _RemoveNear(exhibit);
+        }
+    }
+
+    private void _AddNear(ExhibitInteractable exhibit)
+    {
+        for (int i = 0; i < _nearCount; i++)
+        {
+            if (_near[i] == exhibit) return;
+        }
+
+        if (_nearCount >= _near.Length)
+        {
+            ExhibitInteractable[] grown = new ExhibitInteractable[_near.Length * 2];
+            for (int i = 0; i < _nearCount; i++) grown[i] = _near[i];
+            _near = grown;
+        }
+
+        _near[_nearCount] = exhibit;
+        _nearCount++;
+    }
+
+    private void _RemoveNear(ExhibitInteractable exhibit)
+    {
+        for (int i = 0; i < _nearCount; i++)
+        {
+            if (_near[i] != exhibit) continue;
+            _RemoveNearAt(i);
+            return;
+        }
+    }
+
+    /// <summary>목록에서 빼면서 아이콘도 즉시 숨깁니다. (페이드를 이어 줄 주체가 사라지므로)</summary>
+    private void _RemoveNearAt(int index)
+    {
+        if (index < 0 || index >= _nearCount) return;
+
+        ExhibitInteractable exhibit = _near[index];
+
+        _near[index] = _near[_nearCount - 1];
+        _near[_nearCount - 1] = null;
+        _nearCount--;
+
+        if (!Utilities.IsValid(exhibit)) return;
+        if (!exhibit.gameObject.activeInHierarchy) return;
+        exhibit._HideIcon();
     }
 
     /// <summary>
@@ -141,6 +344,27 @@ public class ExhibitManager : UdonSharpBehaviour
         }
 
         _tickCount = 0;
+
+        // 아이콘도 같은 이유로 즉시 숨깁니다. Manager 가 꺼지면 페이드를 이어 줄 주체가 없어
+        // 아이콘이 반투명한 중간 상태로 굳어 버립니다.
+        if (_near == null)
+        {
+            _nearCount = 0;
+            return;
+        }
+
+        for (int i = 0; i < _nearCount; i++)
+        {
+            ExhibitInteractable exhibit = _near[i];
+            _near[i] = null;
+
+            if (!Utilities.IsValid(exhibit)) continue;
+            if (!exhibit.gameObject.activeInHierarchy) continue;
+
+            exhibit._HideIcon();
+        }
+
+        _nearCount = 0;
     }
 
     // ---------------------------------------------------------------------
@@ -162,6 +386,10 @@ public class ExhibitManager : UdonSharpBehaviour
 
         _ticks = new ExhibitOverlay[8];
         _tickCount = 0;
+
+        _near = new ExhibitInteractable[8];
+        _nearCount = 0;
+        _scanCursor = 0;
     }
 
     // ---------------------------------------------------------------------
@@ -277,6 +505,9 @@ public class ExhibitManager : UdonSharpBehaviour
         _EnsureInit();
         if (!Utilities.IsValid(exhibit)) return;
 
+        // 근접 목록에서도 빼고 아이콘을 숨깁니다. (남겨 두면 꺼진 작품의 아이콘이 떠 있게 됩니다)
+        _RemoveNear(exhibit);
+
         for (int i = 0; i < _exhibitCount; i++)
         {
             if (_exhibits[i] != exhibit) continue;
@@ -377,6 +608,6 @@ public class ExhibitManager : UdonSharpBehaviour
     {
         _EnsureInit();
         Debug.Log("[ExhibitManager] lang=" + _languageIndex + " exhibits=" + _exhibitCount +
-                  " switches=" + _switchCount + " ticking=" + _tickCount);
+                  " switches=" + _switchCount + " ticking=" + _tickCount + " near=" + _nearCount);
     }
 }

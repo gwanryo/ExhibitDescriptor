@@ -213,6 +213,28 @@ public class ExhibitOverlay : UdonSharpBehaviour
         _FinishImmediate();
     }
 
+    /// <summary>
+    /// 이 Overlay Canvas 의 월드 <b>반폭</b>(m)입니다. Panel 을 아이콘 옆에 붙일 때 씁니다.
+    ///
+    /// 에디터 상수(600px × 0.001)를 런타임에 하드코딩하지 않는 이유: 사용자가 Panel 크기나
+    /// Canvas Scale 을 바꿨을 때 아이콘과 Panel 사이가 벌어지거나 겹치기 때문입니다.
+    /// 실제 RectTransform 에서 읽으면 그 수정이 자동으로 반영됩니다.
+    /// </summary>
+    public float _GetWorldHalfWidth()
+    {
+        RectTransform rect = GetComponent<RectTransform>();
+        if (!Utilities.IsValid(rect)) return 0f;
+        return rect.rect.width * rect.localScale.x * 0.5f;
+    }
+
+    /// <summary>이 Overlay Canvas 의 월드 <b>반높이</b>(m)입니다. Above / Below 배치에서 씁니다.</summary>
+    public float _GetWorldHalfHeight()
+    {
+        RectTransform rect = GetComponent<RectTransform>();
+        if (!Utilities.IsValid(rect)) return 0f;
+        return rect.rect.height * rect.localScale.y * 0.5f;
+    }
+
     /// <summary>표시할 텍스트를 설정합니다. 빈 문자열이면 해당 요소를 숨깁니다.</summary>
     public void _SetContent(string title, string subtitle, string body)
     {

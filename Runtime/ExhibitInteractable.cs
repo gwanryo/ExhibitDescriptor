@@ -93,9 +93,57 @@ public class ExhibitInteractable : UdonSharpBehaviour
     [Min(0.1f)] [SerializeField] private float interactionProximity = 2f;
 #pragma warning restore 0414
 
-    [Header("Overlay 배치")]
-    [Tooltip("Overlay 를 열 때 OverlayAnchor 의 위치/회전으로 스냅합니다. (방향 고정)")]
+    [Header("Overlay 배치 (레거시 1.0.x 전용)")]
+    [Tooltip("Overlay 를 열 때 OverlayAnchor 의 위치/회전으로 스냅합니다. (방향 고정)\n" +
+             "ⓘ 아이콘이 있는 작품에서는 런타임이 아이콘 옆으로 배치하므로 이 값은 쓰이지 않습니다.")]
     [SerializeField] private bool snapToAnchorOnOpen = true;
+
+    // ---------------------------------------------------------------------
+    // Info Icon
+    // ---------------------------------------------------------------------
+
+    [Header("Info Icon")]
+    [Tooltip("이 작품 옆에 뜨는 ⓘ 아이콘. 이 참조가 있으면 응시형(1.1+), 없으면 레거시(1.0.x) 방식으로 " +
+             "동작합니다. (Setup 이 자동 연결)")]
+    [SerializeField] private ExhibitInfoIcon infoIcon;
+
+    [Tooltip("아이콘이 작품의 어느 쪽에 붙을지. Default 면 ExhibitManager 의 값을 따릅니다.")]
+    [SerializeField] private ExhibitIconPlacement iconPlacement = ExhibitIconPlacement.Default;
+
+    [Tooltip("체크하면 아래 네 값을 이 작품만 따로 사용합니다. 끄면 ExhibitManager 기본값을 따릅니다.\n" +
+             "iconHeightOffset 은 음수가 정당한 값이라 '-1 = 기본값' 같은 sentinel 을 쓸 수 없어 " +
+             "bool 하나로 네 값을 함께 게이트합니다.")]
+    [SerializeField] private bool overrideIconSettings = false;
+
+    [Tooltip("작품 가장자리와 아이콘 사이 여백(m).")]
+    [Min(0f)] [SerializeField] private float iconGap = 0.15f;
+
+    [Tooltip("아이콘 높이 보정(m, 월드 Y). 음수도 정상 값입니다.")]
+    [SerializeField] private float iconHeightOffset = 0f;
+
+    [Tooltip("아이콘 한 변의 길이(m). Editor 의 Setup 이 아이콘 Scale/Collider 에 구워 넣습니다.")]
+    [Min(0.01f)] [SerializeField] private float iconSize = 0.08f;
+
+    [Tooltip("이 거리(m) 밖에서는 아이콘이 뜨지 않습니다.")]
+    [Min(0.5f)] [SerializeField] private float gazeDistance = 6f;
+
+    // ---------------------------------------------------------------------
+    // 에디터가 굽는 기하 정보 (사람이 고칠 값이 아니므로 Inspector 에서 숨깁니다)
+    //
+    // Setup 이 실행될 때마다 무조건 덮어씁니다. 굽는 것이 배치 "결과" 가 아니라 "기하" 라서
+    // 사용자의 수동 보정을 보존할 이유가 없고, 그래서 작품 Mesh 를 교체·이동·스케일해도
+    // 아이콘이 자동으로 따라갑니다. (1.0.x 의 InteractionArea / OverlayAnchor 는 생성 시점
+    //  Bounds 에 고정돼 있었고 Setup 이 다시 계산하지 않아 전부 어긋났습니다)
+    //
+    // iconSize 만 에디터가 함께 굽는 값입니다(아이콘 Scale/Collider). 나머지 아이콘 설정은
+    // 어차피 매 프레임 위치 계산에 쓰이므로 런타임이 Manager fallback 과 함께 해석합니다.
+    // ---------------------------------------------------------------------
+
+    [HideInInspector] [SerializeField] private Vector3 boundsCenterLocal;
+    [HideInInspector] [SerializeField] private Vector3 boundsExtentsLocal;
+
+    /// <summary>0 = X, 1 = Y, 2 = Z. <b>부호는 없습니다.</b> 부호는 런타임이 플레이어 위치로 정합니다.</summary>
+    [HideInInspector] [SerializeField] private int thinAxis;
 
     // ---------------------------------------------------------------------
     // Runtime
@@ -103,6 +151,13 @@ public class ExhibitInteractable : UdonSharpBehaviour
 
     private bool _started;
     private bool _warnedNoManager;
+
+    // 아이콘 상태 (ExhibitManager 의 단일 Update 가 매 프레임 갱신합니다)
+    private float _iconAlpha;
+    private Vector3 _iconPosition;
+    private Quaternion _iconRotation;
+    private Vector3 _iconDirection;      // 작품 중심 -> 아이콘. Panel 을 밀어낼 방향도 이것입니다.
+    private string _interactText = "";
 
     // ---------------------------------------------------------------------
     // Unity / Udon Events
@@ -174,6 +229,10 @@ public class ExhibitInteractable : UdonSharpBehaviour
     {
         if (!Utilities.IsValid(overlay)) return;
 
+        // 응시형 작품은 아이콘 자리에서 펼칩니다.
+        // (버튼이나 다른 스크립트가 이 함수를 직접 부르는 경우도 같은 위치를 씁니다)
+        if (_HasInfoIcon()) { _OpenOverlayAtIcon(); return; }
+
         GameObject overlayObject = overlay.gameObject;
         if (!overlayObject.activeSelf) overlayObject.SetActive(true);
 
@@ -200,6 +259,200 @@ public class ExhibitInteractable : UdonSharpBehaviour
         if (!Utilities.IsValid(overlay)) return;
         if (overlay.IsOpen) _CloseOverlay();
         else _OpenOverlay();
+    }
+
+    // ---------------------------------------------------------------------
+    // Info Icon - Public API (ExhibitManager / ExhibitInfoIcon 이 호출)
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// 이 작품이 응시형 아이콘 방식인지. <b>신규/레거시 판별 기준은 이것 하나뿐입니다.</b>
+    /// (모드 플래그를 따로 두지 않습니다 - Hierarchy 만 봐도 어느 방식인지 알 수 있습니다)
+    ///
+    /// 기하 값이 0 이면 아직 Setup 을 돌리지 않은 것이므로 아이콘 로직을 건너뜁니다.
+    /// 그래야 아이콘을 손으로 붙여만 둔 중간 상태에서 아이콘이 작품 중심에 박히지 않습니다.
+    /// </summary>
+    public bool _HasInfoIcon()
+    {
+        if (!Utilities.IsValid(infoIcon)) return false;
+        return boundsExtentsLocal.sqrMagnitude > 0f;
+    }
+
+    /// <summary>작품 Bounds 중심의 월드 좌표. 근접 스캔과 시선 판정의 기준점입니다.</summary>
+    public Vector3 _GetIconCenter()
+    {
+        return transform.TransformPoint(boundsCenterLocal);
+    }
+
+    /// <summary>이 거리(m) 밖에서는 아이콘이 뜨지 않습니다.</summary>
+    public float _GetGazeDistance()
+    {
+        if (overrideIconSettings) return gazeDistance;
+        if (Utilities.IsValid(manager)) return manager.defaultGazeDistance;
+        return gazeDistance;
+    }
+
+    public bool _IsOverlayOpen()
+    {
+        return Utilities.IsValid(overlay) && overlay.IsOpen;
+    }
+
+    /// <summary>
+    /// 배치 방향을 int 로 돌려줍니다. (Default 면 Manager 값으로 치환)
+    /// enum 이 sentinel(Default) 을 자연스럽게 표현하므로 방향만 override 와 무관하게 단독 상속됩니다.
+    /// </summary>
+    public int _GetIconPlacementIndex()
+    {
+        ExhibitIconPlacement resolved = iconPlacement;
+
+        if (resolved == ExhibitIconPlacement.Default)
+        {
+            resolved = Utilities.IsValid(manager) ? manager.defaultIconPlacement : ExhibitIconPlacement.Right;
+        }
+
+        // Manager 쪽도 Default 로 남겨 둔 구성에서 아이콘이 사라지지 않도록 마지막 방어선을 둡니다.
+        if (resolved == ExhibitIconPlacement.Default) resolved = ExhibitIconPlacement.Right;
+
+        return (int)resolved;
+    }
+
+    /// <summary>
+    /// ExhibitManager 의 단일 Update 가 <b>응시 후보(_near)</b> 에 든 작품에만 매 프레임 호출합니다.
+    ///
+    /// <b>이 함수가 이 설계의 핵심입니다.</b> 에디터는 기하(중심 / extents / 얇은 축)만 굽고,
+    /// 배치의 부호(+/-)는 여기서 플레이어 머리 위치로 정합니다.
+    ///
+    ///   side = sign( dot(head - center, thinAxisWorld) )
+    ///
+    /// 시선 판정을 위해 어차피 머리 위치를 읽으므로 이 값은 공짜입니다. 벽에 걸린 액자는
+    /// 플레이어가 뒤에 설 수 없으니 항상 정답이고, 좌대 위 조각처럼 사방에서 보는 작품은
+    /// 관람자를 따라 아이콘이 옮겨 다닙니다.
+    ///
+    /// 이 결정 하나로 1.0.x 의 다음이 전부 사라졌습니다: 에디터의 정면 부호 추측
+    /// (<c>GetFrontNormalAxis</c> 의 "+ 를 정면으로 봄"), 캔버스 반전 규약
+    /// (<c>GetOverlayRotation</c>), <c>OverlayAnchor</c> 수동 180도 보정.
+    ///
+    /// <b>고개를 돌려도 아이콘은 움직이지 않습니다.</b> dir 을 머리 forward 가 아니라
+    /// <i>작품 → 플레이어</i> 방향에서 뽑기 때문입니다. 제자리에서 고개만 돌릴 때는 반응하지 않고,
+    /// 실제로 걸어서 이동해야 옆으로 옮겨 갑니다.
+    /// </summary>
+    public void _TickIcon(Vector3 headPosition, Vector3 headForward, float deltaTime,
+                          float cosEnter, float cosExit)
+    {
+        if (!_HasInfoIcon()) return;
+
+        Vector3 center = _GetIconCenter();
+        Vector3 toHead = headPosition - center;
+
+        // ---- 부호 결정: 얇은 축 중 플레이어가 서 있는 쪽 ---------------------
+        Vector3 axis = transform.rotation * _AxisVector(thinAxis);
+        float side = Vector3.Dot(toHead, axis) >= 0f ? 1f : -1f;
+        Vector3 front = axis * side;                       // 작품 -> 플레이어
+
+        // ---- 아이콘을 밀어낼 방향 -------------------------------------------
+        Vector3 flatFront = new Vector3(front.x, 0f, front.z);
+
+        // 바닥에 눕힌 작품(좌대 위 평면 작품 등)은 front 가 거의 수직이라 Right/Left 가
+        // 불안정합니다. 그때만 머리 forward 를 XZ 평면에 투영한 값으로 대체합니다.
+        if (flatFront.sqrMagnitude < 0.0001f)
+        {
+            flatFront = new Vector3(headForward.x, 0f, headForward.z);
+        }
+        // 똑바로 위/아래를 보고 있으면 그것마저 0 이 됩니다. 정규화 폭주(NaN)를 막습니다.
+        if (flatFront.sqrMagnitude < 0.0001f) flatFront = Vector3.forward;
+        flatFront = flatFront.normalized;
+
+        int placement = _GetIconPlacementIndex();
+        Vector3 direction;
+
+        // Above / Below 는 월드 Y 고정이라 바닥에 눕힌 작품에도 영향을 받지 않습니다.
+        if (placement == (int)ExhibitIconPlacement.Above) direction = Vector3.up;
+        else if (placement == (int)ExhibitIconPlacement.Below) direction = Vector3.down;
+        // 관람자 기준 오른쪽은 -Cross(up, flatFront) 입니다.
+        // (flatFront = -관람자forward 이므로 Cross(up, flatFront) = -관람자right)
+        // 이 부호와 아래 iconRotation 방향은 ClientSim 실기 스크린샷으로 확정한 값입니다.
+        // 식만 보고 뒤집지 마세요 - 과거 Panel 좌우 반전 회귀가 있었던 지점입니다.
+        else if (placement == (int)ExhibitIconPlacement.Left) direction = Vector3.Cross(Vector3.up, flatFront);
+        else direction = -Vector3.Cross(Vector3.up, flatFront);
+
+        // ---- 작품 OBB 의 direction 방향 반폭 ---------------------------------
+        // extents 는 Exhibit Root 의 로컬 단위이고, 에디터 도구가 Root 의 월드 Scale 을 1 로
+        // 맞춰 두므로(NeutralizeWorldScale) 그대로 m 로 씁니다.
+        float halfExtent =
+            Mathf.Abs(Vector3.Dot(direction, transform.right)) * boundsExtentsLocal.x +
+            Mathf.Abs(Vector3.Dot(direction, transform.up)) * boundsExtentsLocal.y +
+            Mathf.Abs(Vector3.Dot(direction, transform.forward)) * boundsExtentsLocal.z;
+
+        Vector3 iconPosition = center
+            + direction * (halfExtent + _IconGap())
+            + Vector3.up * _IconHeightOffset()
+            + front * 0.02f;               // 벽/작품 표면에 파묻히지 않도록 살짝 앞으로
+
+        // World Space Canvas 는 자기 forward 의 <반대쪽>에 선 사람에게 글자가 정방향으로 읽힙니다.
+        // 그래서 관람자를 "바라보게" 하지 않고, 관람자에게서 멀어지는 쪽을 forward 로 둡니다.
+        // (판정식: dot(관람자 - 아이콘, 아이콘 forward) < 0.
+        //  각도만 보는 검증(Vector3.Angle ≈ 0)은 180도 뒤집힌 캔버스도 통과시킵니다)
+        Quaternion iconRotation = Quaternion.LookRotation(iconPosition - headPosition, Vector3.up);
+
+        _iconPosition = iconPosition;
+        _iconRotation = iconRotation;
+        _iconDirection = direction;
+
+        // ---- 시선 판정 (히스테리시스) ---------------------------------------
+        // 아이콘을 조준하려고 고개를 돌리면 작품 중심이 시야에서 벗어나 아이콘이 사라지는
+        // 자기모순이 생깁니다. 그래서 "나타남" 과 "유지" 의 조건을 분리합니다.
+        GameObject iconObject = infoIcon.gameObject;
+        bool showing = iconObject.activeSelf;
+        bool hold;
+
+        if (_IsOverlayOpen())
+        {
+            hold = true;                   // 읽는 중에는 시선이 벗어나도 유지합니다.
+        }
+        else if (showing)
+        {
+            hold = _WithinCone(center - headPosition, headForward, cosExit) ||
+                   _WithinCone(iconPosition - headPosition, headForward, cosExit);
+        }
+        else
+        {
+            hold = _WithinCone(center - headPosition, headForward, cosEnter);
+        }
+
+        _ApplyIconVisual(hold, deltaTime);
+    }
+
+    /// <summary>
+    /// 아이콘을 애니메이션 없이 즉시 숨깁니다. 근접 범위(_near)를 벗어났거나
+    /// Manager 가 꺼져 Update 가 멈출 때 호출됩니다. (반투명한 중간 상태로 굳는 것을 막습니다)
+    /// </summary>
+    public void _HideIcon()
+    {
+        if (!Utilities.IsValid(infoIcon)) return;
+
+        _iconAlpha = 0f;
+
+        GameObject iconObject = infoIcon.gameObject;
+        if (!iconObject.activeSelf) return;
+
+        // 비활성화하기 전에 alpha 를 0 으로 만들어 둡니다. 꺼진 뒤에는 이벤트가 전달되지 않아
+        // 다음에 켤 때 예전 alpha 로 한 프레임 번쩍입니다.
+        infoIcon._SetAlpha(0f);
+        iconObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// <see cref="ExhibitInfoIcon"/> 이 Interact 를 받았을 때 호출합니다.
+    /// 같은 아이콘을 다시 누르면 Toggle 로 닫힙니다. (작품 Interact 와 같은 규칙)
+    /// </summary>
+    public void _OnIconInteract()
+    {
+        if (!Utilities.IsValid(overlay)) return;
+
+        _EnsureManager();
+
+        if (overlay.IsOpen) { _CloseOverlay(); return; }
+        _OpenOverlayAtIcon();
     }
 
     /// <summary>ExhibitManager 가 언어를 바꿀 때 호출합니다.</summary>
@@ -298,6 +551,132 @@ public class ExhibitInteractable : UdonSharpBehaviour
         found._RegisterExhibit(this);
     }
 
+    // ---------------------------------------------------------------------
+    // Info Icon - Internal
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Overlay 를 <b>아이콘의 안쪽 가장자리가 맞닿는 위치</b>로 열어 "아이콘에서 펼쳐지는" 연출을 만듭니다.
+    ///
+    /// ExhibitOverlay 의 기존 scale 애니메이션(startScaleMultiplier 0.92 -> 1.0)이 그대로 그 연출이
+    /// 되므로 애니메이션 코드는 손대지 않았습니다. 열려 있는 동안 위치는 고정입니다
+    /// (플레이어를 따라다니지 않습니다).
+    /// </summary>
+    private void _OpenOverlayAtIcon()
+    {
+        GameObject overlayObject = overlay.gameObject;
+        if (!overlayObject.activeSelf) overlayObject.SetActive(true);
+
+        // Above / Below 는 direction 이 수직이므로 폭이 아니라 높이 반값을 씁니다.
+        int placement = _GetIconPlacementIndex();
+        bool vertical = placement == (int)ExhibitIconPlacement.Above ||
+                        placement == (int)ExhibitIconPlacement.Below;
+
+        float halfSpan = vertical ? overlay._GetWorldHalfHeight() : overlay._GetWorldHalfWidth();
+
+        overlayObject.transform.SetPositionAndRotation(
+            _iconPosition + _iconDirection * halfSpan, _iconRotation);
+
+        _PushContent();
+        overlay._Open(manager);
+    }
+
+    /// <summary>축 인덱스(0 = X, 1 = Y, 2 = Z)를 단위 벡터로. 부호는 붙이지 않습니다.</summary>
+    private Vector3 _AxisVector(int axis)
+    {
+        if (axis == 0) return Vector3.right;
+        if (axis == 1) return Vector3.up;
+        return Vector3.forward;
+    }
+
+    /// <summary>
+    /// <paramref name="toTarget"/> 이 <paramref name="headForward"/> 기준 원뿔 안에 있는지.
+    /// 각도 대신 <c>dot(normalize(target - head), forward) &gt; cos(threshold)</c> 로 비교합니다.
+    /// (Acos 을 매 프레임 부르지 않아도 되고, cos 값은 Manager 가 캐시합니다)
+    /// </summary>
+    private bool _WithinCone(Vector3 toTarget, Vector3 headForward, float cosThreshold)
+    {
+        // 머리와 겹칠 만큼 가까우면 방향이 의미가 없습니다. 사라지게 하지 않습니다.
+        if (toTarget.sqrMagnitude < 0.000001f) return true;
+        return Vector3.Dot(toTarget.normalized, headForward) > cosThreshold;
+    }
+
+    private void _ApplyIconVisual(bool hold, float deltaTime)
+    {
+        GameObject iconObject = infoIcon.gameObject;
+
+        if (hold)
+        {
+            if (!iconObject.activeSelf)
+            {
+                _iconAlpha = 0f;
+                iconObject.SetActive(true);
+
+                // 꺼져 있는 동안에는 이벤트가 전달되지 않으므로 켜는 순간 현재 언어 문구를 다시 밀어 넣습니다.
+                infoIcon._SetInteractText(_interactText);
+            }
+
+            _iconAlpha = _StepAlpha(_iconAlpha, 1f, deltaTime);
+        }
+        else
+        {
+            if (!iconObject.activeSelf) return;
+
+            _iconAlpha = _StepAlpha(_iconAlpha, 0f, deltaTime);
+
+            if (_iconAlpha <= 0f)
+            {
+                infoIcon._SetAlpha(0f);
+                iconObject.SetActive(false);
+                return;
+            }
+        }
+
+        infoIcon._SetAlpha(_iconAlpha);
+        infoIcon.transform.SetPositionAndRotation(_iconPosition, _iconRotation);
+    }
+
+    private float _StepAlpha(float current, float target, float deltaTime)
+    {
+        float duration = _IconFadeDuration();
+        if (duration <= 0.0001f) return target;
+
+        float step = deltaTime / duration;
+
+        if (current < target)
+        {
+            current += step;
+            if (current > target) current = target;
+        }
+        else if (current > target)
+        {
+            current -= step;
+            if (current < target) current = target;
+        }
+
+        return current;
+    }
+
+    private float _IconGap()
+    {
+        if (overrideIconSettings) return iconGap;
+        if (Utilities.IsValid(manager)) return manager.defaultIconGap;
+        return iconGap;
+    }
+
+    private float _IconHeightOffset()
+    {
+        if (overrideIconSettings) return iconHeightOffset;
+        if (Utilities.IsValid(manager)) return manager.defaultIconHeightOffset;
+        return iconHeightOffset;
+    }
+
+    private float _IconFadeDuration()
+    {
+        if (Utilities.IsValid(manager)) return manager.iconFadeDuration;
+        return 0.12f;
+    }
+
     private int _CurrentLanguage()
     {
         if (!Utilities.IsValid(manager)) return 0;
@@ -350,6 +729,14 @@ public class ExhibitInteractable : UdonSharpBehaviour
         //  Tools > Exhibit Descriptor > Setup All Exhibits In Scene
         // -----------------------------------------------------------------
         InteractionText = text;
+
+        // 아이콘이 꺼져 있는 동안에는 이벤트가 전달되지 않으므로, 켜는 순간 다시 밀어 넣도록 보관합니다.
+        _interactText = text;
+
+        if (Utilities.IsValid(infoIcon) && infoIcon.gameObject.activeInHierarchy)
+        {
+            infoIcon._SetInteractText(text);
+        }
 
         // Interact 판정을 대신 받는 자식 영역(InteractionArea)에도 같은 값을 적용합니다.
         if (interactRelays == null) return;

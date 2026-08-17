@@ -22,3 +22,18 @@ public enum ExhibitButtonAction
     ScrollUp = 1,
     ScrollDown = 2,
 }
+
+/// <summary>
+/// ⓘ 아이콘이 작품의 어느 쪽에 붙을지. 방향은 전부 <b>관람자 기준</b>입니다.
+///
+/// <c>Default = 0</c> 인 이유: 이미 만들어 둔 Exhibit 에 이 필드가 새로 추가돼도
+/// Unity 는 없는 필드를 0 으로 채우므로 자동으로 "Manager 기본값을 따름" 이 됩니다.
+/// </summary>
+public enum ExhibitIconPlacement
+{
+    Default = 0,   // ExhibitManager 의 defaultIconPlacement 를 따름
+    Right = 1,     // 관람자 기준 오른쪽
+    Left = 2,      // 관람자 기준 왼쪽
+    Above = 3,     // 작품 위 (월드 +Y)
+    Below = 4,     // 작품 아래 (월드 -Y)
+}
