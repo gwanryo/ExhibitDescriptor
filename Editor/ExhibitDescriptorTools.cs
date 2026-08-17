@@ -14,7 +14,7 @@ using VRC.Udon;
 /// Exhibit Descriptor 용 Editor 자동화 도구.
 ///
 /// Tools > Exhibit Descriptor
-///   - Create Exhibition Root            : ExhibitionRoot + ExhibitManager 생성
+///   - Create Exhibition Root            : ExhibitionRoot + ExhibitManager(+ ExhibitDescriptorSettings) 생성
 ///   - Create Exhibit (Template)         : Overlay 포함 작품 1개를 통째로 생성 + 자동 연결
 ///   - Create Exhibits From Selected Meshes : 선택한 Mesh 를 작품으로 일괄 변환 (ExhibitDescriptorBatchTools.cs)
 ///   - Setup Selected Exhibits           : 선택한 작품들의 참조 자동 연결 + Interact 값 반영
@@ -60,6 +60,10 @@ public static partial class ExhibitDescriptorTools
         GameObject managerObject = new GameObject("ExhibitManager");
         managerObject.transform.SetParent(root.transform, false);
         managerObject.AddUdonSharpComponent<ExhibitManager>();
+
+        // Overlay 폰트 슬롯은 Udon 화이트리스트 때문에 Manager 가 아니라 이 컴포넌트에 있습니다.
+        // (이유는 ExhibitDescriptorSettings 주석 참고)
+        EnsureSettings(managerObject);
 
         Selection.activeGameObject = managerObject;
         MarkSceneDirty();
@@ -154,7 +158,11 @@ public static partial class ExhibitDescriptorTools
         GameObject anchor = new GameObject("OverlayAnchor");
         anchor.transform.SetParent(root.transform, false);
         anchor.transform.localPosition = new Vector3(0.9f, 1.5f, 0f);
-        anchor.transform.localRotation = Quaternion.identity;
+        // Placeholder 작품은 로컬 +Z 를 정면으로 보므로 관람자도 +Z 쪽에 섭니다.
+        // World Space Canvas 는 forward(+Z) 의 <반대쪽>에서 글자가 정방향으로 읽히므로
+        // Panel 의 forward 는 -Z(관람자 반대쪽)여야 합니다. identity 로 두면 뒷면을 보여 줘
+        // 글자가 좌우 반전됩니다. (같은 규약: ExhibitDescriptorBatchTools.GetOverlayRotation)
+        anchor.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
 
         // ---- Overlay -----------------------------------------------------
         GameObject overlayObject = BuildOverlay(root.transform);
@@ -381,9 +389,12 @@ public static partial class ExhibitDescriptorTools
         description.text = "Description";
 
         // ---- Buttons ------------------------------------------------------
+        // 라벨 문자는 TMP 기본 폰트(LiberationSans SDF)의 fallback 으로도 그려지는 것만 씁니다.
+        //  - ▲ U+25B2 / ▼ U+25BC : fallback 에 있어 정상 표시
+        //  - ✕ U+2715 : 본 폰트에도 fallback 에도 없어 □ 로 보였습니다. → × U+00D7 로 교체
         CreateButton(panel.transform, "ScrollUpButton", "▲", new Vector2(0f, 0f), new Vector2(28f, 24f), new Vector2(64f, 60f));
         CreateButton(panel.transform, "ScrollDownButton", "▼", new Vector2(0f, 0f), new Vector2(100f, 24f), new Vector2(64f, 60f));
-        CreateButton(panel.transform, "CloseButton", "✕", new Vector2(1f, 0f), new Vector2(-28f, 24f), new Vector2(140f, 60f));
+        CreateButton(panel.transform, "CloseButton", "×", new Vector2(1f, 0f), new Vector2(-28f, 24f), new Vector2(140f, 60f));
 
         return overlayObject;
     }
@@ -448,6 +459,9 @@ public static partial class ExhibitDescriptorTools
             return;
         }
 
+        // 폰트를 읽기 전에 옛 Scene 의 Manager 에 설정 컴포넌트를 보강합니다.
+        EnsureSettingsForLoadedScenes();
+
         int count = 0;
         int switchCount = 0;
 
@@ -476,6 +490,9 @@ public static partial class ExhibitDescriptorTools
     [MenuItem(MenuRoot + "Setup All Exhibits In Scene", false, 31)]
     public static void SetupAllExhibitsInScene()
     {
+        // 폰트를 읽기 전에 옛 Scene 의 Manager 에 설정 컴포넌트를 보강합니다.
+        EnsureSettingsForLoadedScenes();
+
         // 로드된 모든 Scene 을 처리합니다. manager 연결은 각 오브젝트가 속한 Scene 기준으로
         // 이루어지므로, Additive 로 여러 Scene 을 열어 둔 상태에서도 교차 참조가 생기지 않습니다.
         ExhibitInteractable[] all = Object.FindObjectsOfType<ExhibitInteractable>(true);
@@ -534,6 +551,9 @@ public static partial class ExhibitDescriptorTools
         AssignManagerProperty(so, languageSwitch, manager, "언어 전환 버튼");
 
         so.ApplyModifiedProperties();
+
+        // 라벨이 "한국어" / "日本語" 라 폰트가 없으면 그대로 □ 가 됩니다.
+        ApplyOverlayFont(languageSwitch, FindOverlayFont(languageSwitch));
 
         if (languageSwitch.GetComponent<Collider>() == null)
         {
@@ -824,9 +844,125 @@ public static partial class ExhibitDescriptorTools
         }
 
         so.ApplyModifiedProperties();
+
+        // 한글/일본어가 □ 로 보이지 않도록 Manager 에 지정된 폰트를 구워 넣습니다.
+        ApplyOverlayFont(overlay, FindOverlayFont(overlay));
+
         EditorUtility.SetDirty(overlay);
         UdonSharpEditorUtility.CopyProxyToUdon(overlay);
         RecordPrefabModifications(overlay);
+    }
+
+    /// <summary>
+    /// 같은 Scene 의 <see cref="ExhibitDescriptorSettings"/> 에 지정된 Overlay 폰트를 가져옵니다.
+    /// (컴포넌트가 없거나 비어 있으면 <c>null</c> = 폰트 미지정)
+    ///
+    /// <see cref="FindManagerForScene"/> 를 쓰지 않는 이유: 그쪽은 Manager 가 2개 이상이면
+    /// 경고를 찍습니다. Setup 한 번에 같은 경고가 여러 번 나가지 않도록 여기서는 조용히 찾습니다.
+    /// 컴포넌트가 없는 옛 Scene 도 조용히 "폰트 미지정" 으로 처리합니다. 그 상태는
+    /// <see cref="ValidateScene"/> 이 한 번만 경고합니다.
+    /// </summary>
+    private static TMP_FontAsset FindOverlayFont(Component context)
+    {
+        if (context == null) return null;
+
+        List<ExhibitDescriptorSettings> settings = CollectSettingsInScene(context.gameObject.scene);
+        for (int i = 0; i < settings.Count; i++)
+        {
+            if (settings[i].overlayFont != null) return settings[i].overlayFont;
+        }
+
+        return null;
+    }
+
+    /// <summary>해당 Scene 안의 <see cref="ExhibitDescriptorSettings"/> 를 모두 모읍니다. (비활성 포함)</summary>
+    private static List<ExhibitDescriptorSettings> CollectSettingsInScene(Scene scene)
+    {
+        List<ExhibitDescriptorSettings> result = new List<ExhibitDescriptorSettings>();
+        if (!scene.IsValid()) return result;
+
+        ExhibitDescriptorSettings[] all = Object.FindObjectsOfType<ExhibitDescriptorSettings>(true);
+        for (int i = 0; i < all.Length; i++)
+        {
+            if (all[i].gameObject.scene == scene) result.Add(all[i]);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// <paramref name="managerObject"/> 에 <see cref="ExhibitDescriptorSettings"/> 를 보장합니다.
+    /// (이미 있으면 그것을 그대로 돌려줍니다)
+    /// </summary>
+    private static ExhibitDescriptorSettings EnsureSettings(GameObject managerObject)
+    {
+        if (managerObject == null) return null;
+
+        ExhibitDescriptorSettings settings = managerObject.GetComponent<ExhibitDescriptorSettings>();
+        if (settings != null) return settings;
+
+        return Undo.AddComponent<ExhibitDescriptorSettings>(managerObject);
+    }
+
+    /// <summary>
+    /// 로드된 Scene 의 Manager 에 <see cref="ExhibitDescriptorSettings"/> 가 없으면 붙입니다.
+    ///
+    /// Overlay 폰트 슬롯이 Manager 에서 이 컴포넌트로 옮겨졌기 때문에, 옛 버전으로 만든 Scene 에는
+    /// 컴포넌트가 없습니다. 사용자가 Add Component 를 손으로 찾지 않아도 되도록 Setup 메뉴가
+    /// 한 번 붙여 줍니다. 저장 시 자동 Setup(<c>sceneSaving</c>) 경로에서는 부르지 않습니다 -
+    /// 저장 중에 컴포넌트를 새로 붙이면 그 Scene 이 다시 dirty 가 되기 때문입니다.
+    /// </summary>
+    private static void EnsureSettingsForLoadedScenes()
+    {
+        for (int s = 0; s < SceneManager.sceneCount; s++)
+        {
+            Scene scene = SceneManager.GetSceneAt(s);
+            if (!scene.isLoaded) continue;
+
+            List<ExhibitManager> managers = CollectManagersInScene(scene);
+            for (int i = 0; i < managers.Count; i++)
+            {
+                if (managers[i].GetComponent<ExhibitDescriptorSettings>() != null) continue;
+
+                EnsureSettings(managers[i].gameObject);
+                MarkSceneDirtyFor(managers[i].gameObject);
+
+                Debug.Log("[ExhibitDescriptor] ExhibitManager 에 ExhibitDescriptorSettings 를 추가했습니다. " +
+                          "Overlay 폰트는 이제 이 컴포넌트의 'Overlay Font' 에 지정합니다: " +
+                          GetPath(managers[i].transform), managers[i]);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="root"/> 아래의 모든 TMP 텍스트에 폰트를 적용합니다.
+    ///
+    /// 폰트를 패키지에 동봉하지 않고 <see cref="ExhibitDescriptorSettings.overlayFont"/> 슬롯으로 받는 이유
+    ///  - CJK 글리프를 담은 폰트는 재배포 조건이 폰트마다 다릅니다. 패키지가 임의로 품으면
+    ///    이 패키지를 쓰는 월드까지 그 라이선스를 따라가게 됩니다. 그래서 폰트 선택은
+    ///    프로젝트에 맡기고, 도구는 "지정한 폰트를 빠짐없이 꽂아 주는" 일만 합니다.
+    ///  - 폰트를 지정하지 않으면 TMP 기본값(LiberationSans SDF)이 쓰이는데 한글/일본어 글리프가
+    ///    없어 전부 □ 로 보입니다. 이 상태는 <see cref="ValidateScene"/> 이 경고합니다.
+    ///
+    /// 언어 전환 버튼 라벨도 대상입니다. "한국어" / "日本語" 를 표시하므로 같은 문제가 납니다.
+    /// </summary>
+    private static void ApplyOverlayFont(Component root, TMP_FontAsset font)
+    {
+        if (root == null || font == null) return;
+
+        TMP_Text[] texts = root.GetComponentsInChildren<TMP_Text>(true);
+        for (int i = 0; i < texts.Length; i++)
+        {
+            TMP_Text text = texts[i];
+            if (text == null) continue;
+            if (text.font == font) continue;
+
+            Undo.RecordObject(text, "Apply Overlay Font");
+            text.font = font;
+
+            EditorUtility.SetDirty(text);
+            RecordPrefabModifications(text);
+        }
     }
 
     private static void SetupButton(ExhibitOverlayButton button, ExhibitOverlay overlay)
@@ -974,6 +1110,17 @@ public static partial class ExhibitDescriptorTools
                 Debug.LogWarning("[ExhibitDescriptor] Scene '" + scene.name + "' 의 ExhibitManager 오브젝트 이름이 " +
                                  "'ExhibitManager' 가 아닙니다. 작품의 managerObjectName 과 일치시키거나 " +
                                  "manager 를 직접 연결하세요.", manager);
+            }
+
+            // Overlay 폰트 슬롯은 Manager 가 아니라 이 컴포넌트에 있습니다(Udon 화이트리스트 때문).
+            // 옛 버전으로 만든 Scene 에는 없으므로 "폰트 미지정" 으로 동작합니다. 오류는 아닙니다.
+            if (CollectSettingsInScene(scene).Count == 0)
+            {
+                Debug.LogWarning("[ExhibitDescriptor] Scene '" + scene.name + "' 의 ExhibitManager 에 " +
+                                 "ExhibitDescriptorSettings 컴포넌트가 없어 Overlay 폰트를 지정할 수 없습니다. " +
+                                 "(지금은 폰트 미지정 = TMP 기본 폰트) " +
+                                 "Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 한 번 실행하면 " +
+                                 "자동으로 붙습니다.", manager);
             }
         }
 
@@ -1128,8 +1275,99 @@ public static partial class ExhibitDescriptorTools
             }
         }
 
+        // 폰트에 글리프가 없으면 참조가 전부 맞아도 화면에는 □ 만 뜹니다.
+        ValidateFontGlyphs(overlays, switches);
+
         if (errors == 0) Debug.Log("[ExhibitDescriptor] Validate 통과. 작품 " + exhibits.Length + " 개.");
         else Debug.LogError("[ExhibitDescriptor] Validate 실패: 오류 " + errors + " 건.");
+    }
+
+    // 폰트 검사용 표본 문자
+    //  KR: 이 패키지는 titleKR / descriptionKR / 기본 Interact 문구가 한국어인 KR 우선 패키지입니다.
+    //  JP: 언어 전환 버튼 라벨이 "日本語" 이고 JP 데이터도 함께 다룹니다.
+    //  기호: 도구가 만드는 버튼 라벨(× ▲ ▼). 사용자가 폰트를 바꿨을 때 여기서 깨지는지 봅니다.
+    private const string GlyphProbeKR = "한글작품설명";
+    private const string GlyphProbeJP = "日本語説明";
+    private const string GlyphProbeSymbol = "×▲▼";
+
+    /// <summary>
+    /// Overlay / 언어 전환 버튼이 실제로 쓰는 TMP 폰트에 한글·일본어·버튼 기호 글리프가 있는지 봅니다.
+    ///
+    /// 폰트를 지정하지 않으면 TMP 기본값(LiberationSans SDF)이 쓰이는데, 여기에는 한글도 일본어도
+    /// 없어 설명이 통째로 □ 로 보입니다. 참조 검사만으로는 절대 드러나지 않는 문제라 함께 봅니다.
+    /// 같은 경고를 100번 찍지 않도록 <b>폰트 1개당 1번만</b> 보고합니다.
+    /// </summary>
+    private static void ValidateFontGlyphs(ExhibitOverlay[] overlays, ExhibitLanguageSwitch[] switches)
+    {
+        List<TMP_Text> texts = new List<TMP_Text>();
+        for (int i = 0; i < overlays.Length; i++) texts.AddRange(overlays[i].GetComponentsInChildren<TMP_Text>(true));
+        for (int i = 0; i < switches.Length; i++) texts.AddRange(switches[i].GetComponentsInChildren<TMP_Text>(true));
+
+        List<TMP_FontAsset> reported = new List<TMP_FontAsset>();
+        bool reportedMissingAsset = false;
+
+        for (int i = 0; i < texts.Count; i++)
+        {
+            TMP_Text text = texts[i];
+            if (text == null) continue;
+
+            // font 가 비어 있으면 TMP 가 기본 폰트로 그립니다. 검사도 같은 기준으로 합니다.
+            TMP_FontAsset font = text.font != null ? text.font : TMP_Settings.defaultFontAsset;
+
+            if (font == null)
+            {
+                if (reportedMissingAsset) continue;
+                reportedMissingAsset = true;
+
+                Debug.LogWarning("[ExhibitDescriptor] TMP 폰트가 지정되지 않았고 TMP 기본 폰트도 없습니다. " +
+                                 "Window > TextMeshPro > Import TMP Essential Resources 를 먼저 실행하세요: " +
+                                 GetPath(text.transform), text);
+                continue;
+            }
+
+            if (reported.Contains(font)) continue;
+            reported.Add(font);
+
+            string missingKR = FindMissingGlyphs(font, GlyphProbeKR);
+            string missingJP = FindMissingGlyphs(font, GlyphProbeJP);
+            string missingSymbol = FindMissingGlyphs(font, GlyphProbeSymbol);
+
+            if (missingKR.Length == 0 && missingJP.Length == 0 && missingSymbol.Length == 0) continue;
+
+            string message = "[ExhibitDescriptor] 폰트 '" + font.name + "' 에 없는 글자가 있어 □ 로 표시됩니다.";
+            if (missingKR.Length > 0) message += "\n - 지정한 폰트에 한글 글리프가 없습니다: " + missingKR;
+            if (missingJP.Length > 0) message += "\n - 일본어 글리프가 없습니다: " + missingJP;
+            if (missingSymbol.Length > 0) message += "\n - 버튼 라벨 기호가 없습니다: " + missingSymbol;
+
+            message += "\nCJK 글리프를 포함한 TMP Font Asset 을 만들어 ExhibitManager 의 " +
+                       "ExhibitDescriptorSettings > 'Overlay Font' 에 지정하고 " +
+                       "Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 다시 실행하세요. " +
+                       "(만드는 방법은 README 의 'CJK 폰트 준비' 참고)" +
+                       "\n예: " + GetPath(text.transform);
+
+            Debug.LogWarning(message, text);
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="probe"/> 의 글자 중 폰트에 없는 것만 모아 돌려줍니다. (없으면 빈 문자열)
+    ///
+    /// fallback 까지 함께 봅니다. TMP 기본 폰트는 ▲▼ 를 본체에 갖고 있지 않지만
+    /// 'LiberationSans SDF - Fallback' 이 대신 그려 주므로 실제로는 정상 표시됩니다.
+    /// 없는 글자를 아틀라스에 새로 추가하지는 않습니다(tryAddCharacter = false). 검사만 해야 하니까요.
+    /// </summary>
+    private static string FindMissingGlyphs(TMP_FontAsset font, string probe)
+    {
+        if (font == null) return probe;
+
+        string missing = "";
+        for (int i = 0; i < probe.Length; i++)
+        {
+            if (font.HasCharacter(probe[i], true, false)) continue;
+            missing += probe[i];
+        }
+
+        return missing;
     }
 
     // =====================================================================
@@ -1157,6 +1395,15 @@ public static partial class ExhibitDescriptorTools
         rect.offsetMax = Vector2.zero;
     }
 
+    /// <summary>
+    /// TMP 텍스트의 공통 설정입니다. <b>font(TMP_FontAsset)는 여기서 정하지 않습니다.</b>
+    ///
+    /// 폰트는 Scene 의 <see cref="ExhibitDescriptorSettings.overlayFont"/> 에서 가져와
+    /// <see cref="ApplyOverlayFont"/> 가 Setup 단계에 적용합니다. 생성 시점의 이 함수는
+    /// 아직 어느 Scene 의 Manager 에 붙을지 모르고, 이미 만들어 둔 작품에도 나중에 폰트를
+    /// 바꿔 끼울 수 있어야 하기 때문입니다.
+    /// (지정하지 않으면 TMP 기본 폰트가 쓰이는데 한글/일본어가 □ 로 보입니다 - Validate 가 경고합니다)
+    /// </summary>
     private static void ConfigureText(TextMeshProUGUI text, float fontSize, FontStyles style, TextAlignmentOptions alignment)
     {
         text.fontSize = fontSize;

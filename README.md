@@ -35,7 +35,10 @@ Packages/com.gwanryo.exhibit-descriptor/
 │  ├─ ExhibitOverlay.cs            // 작품별 Overlay. Fade+Scale, 스크롤
 │  ├─ ExhibitOverlayButton.cs      // Close / ScrollUp / ScrollDown 버튼
 │  ├─ ExhibitLanguageSwitch.cs     // 월드용 언어 전환 버튼 (선택)
-│  └─ ExhibitDescriptor.asmdef     // 런타임 어셈블리 정의
+│  ├─ ExhibitDescriptorSettings.cs // Editor 전용 설정(Overlay Font). U# 이 아닌 MonoBehaviour
+│  ├─ ExhibitDescriptor.asmdef     // 런타임 어셈블리 정의
+│  ├─ ExhibitDescriptor.asset      // U# 어셈블리 등록 (이게 없으면 UdonSharp 가 위 스크립트를 컴파일하지 않습니다)
+│  └─ Exhibit*.asset               // 스크립트 6개의 Udon C# Program Asset
 ├─ Editor/
 │  ├─ ExhibitDescriptorTools.cs         // 자동 생성 / 자동 연결 / 검증 도구
 │  ├─ ExhibitDescriptorBatchTools.cs    // Mesh 일괄 변환 / 저장 시 자동 Setup
@@ -63,7 +66,8 @@ Packages/com.gwanryo.exhibit-descriptor/
    - `ClientSim` (테스트용, 권장)
 3. `TextMeshPro` 는 SDK 의존성으로 이미 들어 있습니다. 없다면
    `Window > TextMeshPro > Import TMP Essential Resources` 를 1회 실행합니다.
-4. 이 폴더(`Assets/ExhibitDescriptor`)를 프로젝트의 `Assets` 아래에 복사합니다.
+4. 위 [설치](#설치) 절차대로 이 패키지를 추가합니다.
+   `Assets/` 아래에 복사하지 마세요. `Packages/` 설치본과 GUID 가 겹칩니다.
 5. Unity 가 컴파일을 끝내면 상단 메뉴에 **`Tools > Exhibit Descriptor`** 가 나타납니다.
 
 ### CJK 폰트 준비 (필수)
@@ -85,9 +89,35 @@ Packages/com.gwanryo.exhibit-descriptor/
 3. **Generate Font Atlas → Save as** `NotoSansCJK SDF`
 4. 아틀라스가 너무 커지면 **Atlas Population Mode = Dynamic** 으로 두고
    자주 쓰는 글자만 Static 으로 굽는 방식도 가능합니다. (PC 전용이므로 Dynamic 도 무방)
-5. 생성한 Font Asset 을 이후 모든 TMP 텍스트의 `Font Asset` 에 지정합니다.
+5. 생성한 Font Asset 을 **`ExhibitManager` 오브젝트의 `Exhibit Descriptor Settings` 컴포넌트 →
+   `Overlay Font` 슬롯**에 지정합니다.
+   (`Create Exhibition Root` 가 이 컴포넌트를 같이 붙입니다. 옛 버전으로 만든 Scene 이라 없으면
+   `Setup All Exhibits In Scene` 을 한 번 실행하면 자동으로 붙습니다)
+6. `Tools > Exhibit Descriptor > Setup All Exhibits In Scene` 을 실행합니다.
+   그 Scene 의 모든 Overlay 텍스트(제목/부제/본문/버튼 라벨)와 언어 전환 버튼 라벨에
+   폰트가 한 번에 적용됩니다. 이후 새로 만드는 작품에도 생성 즉시 적용됩니다.
 
 > **주의:** 기본 `LiberationSans SDF` 에는 한글/일본어 글리프가 없어 □ 로 표시됩니다.
+> `Overlay Font` 를 비워 두면 이 기본 폰트가 쓰이므로 `작품 제목` / `설명` 이 통째로 □ 가 됩니다.
+> `Validate Scene` 이 이 상태를 **"지정한 폰트에 한글 글리프가 없습니다"** 로 경고합니다.
+
+**폰트를 패키지에 동봉하지 않는 이유**
+
+CJK 글리프를 담은 폰트는 재배포 조건이 폰트마다 다릅니다. 패키지가 폰트를 품으면 이 패키지를
+쓰는 월드까지 그 라이선스를 함께 지게 되므로, **폰트 선택은 프로젝트에 맡기고 슬롯만 제공**합니다.
+(`Noto Sans CJK KR` / `Source Han Sans` 는 OFL 이라 대개 무난합니다. 최종 확인은 사용하는 폰트의
+라이선스 원문으로 하세요.)
+
+버튼 라벨은 폰트를 지정하지 않아도 깨지지 않도록 기본 폰트의 fallback 에 있는 문자만 씁니다.
+(`▲` U+25B2 / `▼` U+25BC / 닫기 `×` U+00D7 — 예전에 쓰던 `✕` U+2715 는 fallback 에도 없어 □ 였습니다)
+
+**폰트 슬롯이 `ExhibitManager` 가 아니라 별도 컴포넌트인 이유**
+
+`TMP_FontAsset` 은 **Udon 타입 화이트리스트에 없습니다.** `UdonSharpBehaviour` 의 직렬화 필드는
+전부 Udon 힙에 선언되므로, `ExhibitManager` 에 폰트 슬롯을 두면 U# 컴파일 자체가 실패합니다
+(`TypeResolverException: Type referenced by 'TMProTMP_FontAsset' could not be resolved.`).
+이 값은 Editor 의 Setup 이 읽어 TMP 텍스트에 구워 넣을 뿐 런타임에서는 쓰이지 않으므로,
+Udon 과 무관한 평범한 `MonoBehaviour`(`ExhibitDescriptorSettings`) 로 분리했습니다.
 
 ---
 
@@ -103,8 +133,10 @@ Tools > Exhibit Descriptor > Create Exhibition Root
 
 ```
 ExhibitionRoot
-└─ ExhibitManager      (UdonBehaviour: ExhibitManager)
+└─ ExhibitManager      (UdonBehaviour: ExhibitManager + ExhibitDescriptorSettings)
 ```
+
+`ExhibitDescriptorSettings` 는 Editor 전용 설정(Overlay Font)을 담는 일반 MonoBehaviour 입니다.
 
 이어서:
 
@@ -192,11 +224,12 @@ ExhibitionRoot
 | 위치 | Component | 비고 |
 |---|---|---|
 | ExhibitManager | `ExhibitManager` (U#) | Scene 당 1개 |
+| ExhibitManager | `ExhibitDescriptorSettings` (일반 MonoBehaviour) | Editor 전용 설정(Overlay Font). U# 이 아님 |
 | Exhibit Root | `ExhibitInteractable` (U#) | 작품 데이터 보유 |
 | InteractionArea | `BoxCollider` + `ExhibitInteractRelay` (U#) | `isTrigger = true`, Layer = Default |
 | Overlay | `Canvas` / `CanvasGroup` / `ExhibitOverlay` (U#) | World Space |
 | Panel | `Image` | Scale 애니메이션 대상 |
-| Title/Subtitle/Description | `TextMeshProUGUI` | CJK Font Asset 지정 |
+| Title/Subtitle/Description | `TextMeshProUGUI` | CJK Font Asset (`ExhibitManager > Exhibit Descriptor Settings > Overlay Font` 에서 자동 적용) |
 | Viewport | `RectMask2D` | |
 | Content | `VerticalLayoutGroup`, `ContentSizeFitter` | Vertical = Preferred Size |
 | 각 Button | `Image`, `BoxCollider`, `ExhibitOverlayButton` (U#) | Layer = Default |
@@ -212,6 +245,15 @@ ExhibitionRoot
 | Default Interaction Text KR / EN / JP | `설명` / `Description` / `説明` |
 | Default Proximity | `2` |
 | Debug Log | `false` |
+
+**ExhibitDescriptorSettings** (같은 `ExhibitManager` 오브젝트에 붙는 Editor 전용 컴포넌트)
+
+| 필드 | 기본값 |
+|---|---|
+| **Overlay Font** | 비움 → TMP 기본 폰트. **한글/일본어를 쓰면 반드시 CJK Font Asset 지정** (Setup 이 Overlay·언어 전환 버튼에 적용) |
+
+> `TMP_FontAsset` 은 Udon 화이트리스트에 없어 `ExhibitManager`(U#) 의 필드로 둘 수 없습니다.
+> 자세한 이유는 [CJK 폰트 준비](#cjk-폰트-준비-필수) 마지막 문단 참고.
 
 **ExhibitInteractable**
 
@@ -794,13 +836,13 @@ ExhibitionRoot
 
 | 메뉴 | 기능 |
 |---|---|
-| Create Exhibition Root | Root + Manager 생성 (**활성 Scene** 기준으로 중복 검사) |
+| Create Exhibition Root | Root + Manager(+ Editor 설정 컴포넌트) 생성 (**활성 Scene** 기준으로 중복 검사) |
 | Create Exhibit (Template) | Overlay/버튼/Collider 포함 작품 1개 전체 생성 + 자동 연결 |
 | **Create Exhibits From Selected Meshes** | 선택한 Mesh 를 작품으로 **일괄 변환** (아래 참조) |
 | Setup Selected Exhibits | 선택 작품/언어 전환 버튼의 참조 자동 연결 + Interact 값 베이크 |
 | Setup All Exhibits In Scene | 열려 있는 모든 Scene 일괄 처리 (연결은 **각자의 Scene** 안에서만) |
 | **Auto Setup On Save** | Scene 저장 시 그 Scene 에 Setup 자동 실행 (토글, 기본 ON) |
-| Validate Scene | 누락 참조 / Collider 없음 / Canvas 모드 오류 등을 콘솔에 보고 |
+| Validate Scene | 누락 참조 / Collider 없음 / Canvas 모드 오류 / **폰트에 한글·일본어 글리프 없음** 을 콘솔에 보고 |
 
 **Create Exhibits From Selected Meshes**
 
@@ -811,13 +853,28 @@ Mesh 하나당 Exhibit 하나가 생기고, Mesh 는 **World 위치를 유지한
 | 항목 | 자동 계산 |
 |---|---|
 | 이름 | `Exhibit_###` — Scene 에 있는 마지막 번호 다음부터 (기존 작품을 덮지 않음) |
-| `InteractionArea` BoxCollider | 작품 Bounds + 사방 `0.15m`, 깊이는 최소 `0.3m` |
-| `OverlayAnchor` | 작품 오른쪽 끝 + `0.15m` + Panel 절반폭(`0.3m`), 높이는 작품 중심 |
+| `InteractionArea` BoxCollider | 작품 Bounds + 사방 `0.15m` (정면 법선축은 최소 `0.3m`) |
+| `OverlayAnchor` 위치 | 작품 옆 끝 + `0.15m` + Panel 절반폭(`0.3m`), 높이는 작품 중심 |
+| `OverlayAnchor` 방향 | Panel 의 **글자가 읽히는 면**이 작품 정면 쪽(관람자 쪽)을 향하도록 회전 |
 | `Title KR` | 원본 오브젝트 이름. EN/JP 는 **비움** → KR 로 fallback |
 | 참조 연결 / Interact 베이크 | `SetupExhibitFull` 까지 자동 실행 |
 
 - Bounds 는 자식 Renderer 를 전부 감싸는 AABB 를 **Exhibit Root 로컬 좌표**로 다시 계산합니다.
   (World AABB 의 8개 꼭짓점을 각각 변환 → 회전된 작품에서도 어긋나지 않음)
+- **어느 축이 "정면" 인지는 작품마다 다릅니다.** 로컬 Bounds 에서 가장 얇은 축을 정면 법선축으로 보고,
+  Panel 은 그 축이 아니라 **정면과 수직인 수평축**으로 밀어냅니다. 그래서 벽에 걸린 얇은 액자에서도
+  Panel 이 그림 앞을 가리지 않고, 관람자에게 옆면(선)으로 보이지도 않습니다.
+  (Overlay 에는 빌보드가 없으므로 이 방향이 그대로 런타임 결과입니다)
+- 정면의 **부호**까지는 Bounds 로 알 수 없어 **얇은 축의 + 방향**을 정면으로 봅니다.
+  작품이 반대로 놓여 Panel 이 벽을 보면 `OverlayAnchor` 를 180도 돌리세요.
+  Setup 은 Anchor 를 다시 계산하지 않으므로 그 수정이 유지됩니다.
+- **Canvas 부호 규약:** World Space Canvas 는 자기 `forward`(+Z) 의 **반대쪽**에 선 사람에게
+  글자가 정방향으로 보입니다. 그래서 `OverlayAnchor` 는 관람자 쪽이 아니라 **관람자 반대쪽**을 봅니다.
+  점검할 때는 각도가 아니라 `dot(관람자 위치 - Panel 위치, Overlay.forward) < 0` 으로 확인하세요.
+  (각도만 보면 180도 뒤집힌 Panel 도 "정면을 본다" 로 통과합니다 — 글자가 좌우 반전됩니다)
+  얇은 축이 Z 인 작품의 Anchor 도 `identity` 가 아니라 **Y 180도**가 정상입니다.
+- 바닥에 눕힌 판(얇은 축이 **Y**)은 정면이 하늘/바닥이라 그대로 따라가면 읽을 수 없습니다.
+  이때는 **수평축 중 넓은 쪽**으로 밀어내고 Panel 을 그 방향으로 **세웁니다.** (같으면 X)
 - Exhibit Root 의 `localScale` 은 항상 `1` 입니다. 부모 Scale 이 딸려 들어오면
   World Space Canvas(`0.001`) 까지 함께 찌그러지기 때문입니다.
 - 낮은 좌대/조각은 Anchor 높이를 `bounds.min.y + Panel 절반높이` 로 올려 Panel 이 바닥에 묻히지 않게 합니다.
@@ -909,7 +966,8 @@ Mesh 하나당 Exhibit 하나가 생기고, Mesh 는 **World 위치를 유지한
 | `VRC Ui Shape` 컴포넌트를 못 찾겠다 | **SDK2 전용 컴포넌트** | SDK3(Udon) 월드에는 존재하지 않습니다. 추가하지 마세요 |
 | 버튼이 안 눌린다 | 버튼 Layer 가 `UI` | 버튼 GameObject Layer 를 **Default** 로 변경 (Validate 가 경고함) |
 | Overlay 가 월드 입장 시부터 떠 있다 | Overlay 가 활성 상태로 저장됨 | Prefab 에서 Overlay 를 비활성으로 저장 |
-| 한글/일본어가 □ 로 나온다 | LiberationSans SDF 사용 중 | CJK Font Asset 지정 (1단계) |
+| 한글/일본어가 □ 로 나온다 | LiberationSans SDF 사용 중 | CJK Font Asset 을 `ExhibitManager > Exhibit Descriptor Settings > Overlay Font` 에 지정하고 `Setup All Exhibits In Scene` (1단계) |
+| 닫기 버튼만 □ 로 나온다 | 라벨이 `✕` U+2715 인 구버전 작품 | 라벨을 `×` U+00D7 로 바꾸거나 CJK 폰트 지정 |
 | 텍스트가 잘려서 안 보인다 | Content 의 ContentSizeFitter 누락 | `Vertical Fit = Preferred Size` 설정 |
 | 스크롤이 안 움직인다 | Content Pivot/Anchor 가 Top 이 아님 | Anchor Top-Stretch, Pivot (0.5, 1) |
 | 스크롤이 끝까지 안 간다 | Viewport 높이 계산 대상이 잘못 연결됨 | `scrollViewport` = `Viewport`, `scrollContent` = `Content` |
@@ -924,6 +982,8 @@ Mesh 하나당 Exhibit 하나가 생기고, Mesh 는 **World 위치를 유지한
 | `Multiple EventSystems in scene` 경고 | 씬에 EventSystem 이 있음 | 삭제 (VRChat 이 자체 제공) |
 | Prefab 복제 후 Manager 참조가 비어 있음 | Scene 참조는 Prefab 에 저장 안 됨 | 정상. `Setup All Exhibits In Scene` 실행 or 런타임 자동 Find |
 | Overlay 가 벽에 파묻힌다 | Anchor 가 벽 안쪽 | `OverlayAnchor` 를 벽에서 3~5cm 앞으로 |
+| Panel 이 벽(작품 뒤쪽)을 본다 | 작품의 얇은 축 **-** 방향이 정면 | `OverlayAnchor` 를 180도 회전 (Setup 이 덮어쓰지 않습니다) |
+| 글자가 **좌우 반전**돼 보인다 | 관람자가 Canvas 뒷면을 보고 있음 (`dot(관람자 - Panel, Overlay.forward) > 0`) | `OverlayAnchor` 를 180도 회전. 이 버전 이전에 만든 Exhibit 은 모두 이 상태이므로 Anchor 를 돌리거나 다시 생성하세요 |
 | 빌드 시 `Udon Behaviour serialization` 에러 | U# 프록시와 UdonBehaviour 불일치 | `VRChat SDK > Utilities > Reserialize All Udon Assets` 실행 |
 | Overlay 가 다른 오브젝트 뒤에 그려진다 | World Space Canvas 정렬 | Canvas 의 `Sorting Layer`/`Order in Layer` 조정 또는 Anchor 를 앞으로 |
 
@@ -1017,6 +1077,11 @@ VRChat 규약상 **`_` 로 시작하지 않는 public 메서드는 `SendCustomNe
 - 작품은 있는데 그 Scene 에 `ExhibitManager` 가 없음 (**에러**)
 - 한 Scene 안에 `ExhibitManager` 가 2개 이상 (**에러**, 다른 Scene 의 Manager 는 세지 않음)
 - `Artwork` 가 아직 투명 Placeholder 머티리얼 (**경고** — 일부러 비워 두는 구성도 있으므로 에러는 아님)
+- Overlay / 언어 전환 버튼이 쓰는 폰트에 **한글·일본어·버튼 기호 글리프가 없음** (**경고**)
+  - 폰트 1개당 1번만 보고합니다. 폰트를 비워 둔 경우 TMP 기본 폰트를 기준으로 검사합니다.
+- `ExhibitManager` 에 `ExhibitDescriptorSettings` 컴포넌트가 없음 (**경고**)
+  - 폰트를 지정할 자리가 없는 상태입니다. `Setup All Exhibits In Scene` 을 한 번 실행하면 붙습니다.
+  - 이 경고가 뜨면 화면에는 참조가 다 맞아도 □ 만 보입니다.
 
 ---
 

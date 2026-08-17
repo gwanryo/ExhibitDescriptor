@@ -37,6 +37,10 @@ public class ExhibitManager : UdonSharpBehaviour
     [Tooltip("Editor Tool 이 '작품별 Proximity' 를 일괄 적용할 때 사용할 기본값(m).")]
     [Min(0.1f)] public float defaultProximity = 2f;
 
+    // Overlay 폰트 슬롯(TMP_FontAsset)은 이 컴포넌트가 아니라 같은 GameObject 의
+    // ExhibitDescriptorSettings(평범한 MonoBehaviour) 에 있습니다. 여기에 둘 수 없는 이유는
+    // ExhibitDescriptorSettings 의 주석에 적어 두었습니다. (요약: Udon 타입 화이트리스트)
+
     [Header("Debug")]
     [Tooltip("등록/언어전환 로그를 콘솔에 출력합니다. 완성 후에는 꺼두세요.")]
     [SerializeField] private bool debugLog = false;

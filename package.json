@@ -1,7 +1,7 @@
 {
   "name": "com.gwanryo.exhibit-descriptor",
   "displayName": "Exhibit Descriptor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "unity": "2022.3",
   "description": "작품을 클릭하면 옆에 KR/EN/JP 설명 Overlay 가 뜨는 VRChat 전시 시스템입니다. Interact 판정 영역 자동 생성, 선택한 Mesh 일괄 변환, 참조 자동 연결(Setup), Scene 구성 검증(Validate) 도구를 포함합니다.",
   "author": {

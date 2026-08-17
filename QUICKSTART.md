@@ -13,7 +13,8 @@ VCC 로 만든 VRChat World 프로젝트에 다음이 들어 있어야 합니다
 - `UdonSharp`
 - `ClientSim` (Play 모드 테스트용)
 
-이 폴더를 통째로 `Assets/ExhibitDescriptor/` 에 복사합니다.
+그리고 이 패키지를 VCC 로 추가합니다. (README 의 *설치* 참고)
+`Assets/` 아래로 복사하지 마세요 — `Packages/` 설치본과 GUID 가 겹칩니다.
 Unity 가 컴파일을 끝내면 상단에 **`Tools > Exhibit Descriptor`** 메뉴가 생깁니다.
 → 이 메뉴가 안 보이면 Console 에 컴파일 에러가 있는 겁니다. 거기서 멈추고 에러부터 보세요.
 
@@ -68,7 +69,16 @@ EN / JP 는 **비워 둬도 됩니다.** 비어 있으면 자동으로 KR 로 �
 작품 크기를 크게 바꿨다면 두 개만 맞춰 주세요.
 
 - `InteractionArea` 의 BoxCollider 크기 → 작품을 덮도록
-- `OverlayAnchor` 위치 → 설명이 뜰 자리 (기본: 오른쪽 0.9m, 높이 1.5m)
+- `OverlayAnchor` 위치/회전 → 설명이 뜰 자리와 Panel 이 보는 방향 (기본: 오른쪽 0.9m, 높이 1.5m, Y 180도)
+
+> **회전은 뒤집혀 보이는 쪽이 정상입니다.** World Space Canvas 는 자기 `forward`(+Z) 의 **반대쪽**에서
+> 글자가 정방향으로 읽힙니다. 그래서 Anchor 의 forward 는 관람자 반대쪽을 봅니다.
+> 글자가 좌우 반전돼 보이면 `OverlayAnchor` 를 180도 돌리세요.
+
+> **한글이 □ 로 보이면** 폰트 문제입니다. TMP 기본 폰트에는 한글 글리프가 없습니다.
+> CJK Font Asset 을 만들어 `ExhibitManager` 의 **`Exhibit Descriptor Settings > Overlay Font`** 에 넣고
+> `Tools > Exhibit Descriptor > Setup All Exhibits In Scene` 을 한 번 실행하세요.
+> (만드는 방법은 README 의 "CJK 폰트 준비")
 
 ---
 
@@ -99,8 +109,9 @@ Tools > Exhibit Descriptor > Create Exhibits From Selected Meshes
 | 항목 | 계산 방식 |
 |---|---|
 | 이름 | `Exhibit_001`, `Exhibit_002` … (Scene 에 있는 마지막 번호 다음부터) |
-| `InteractionArea` 크기 | 작품 Bounds + 사방 0.15m (깊이는 최소 0.3m) |
-| `OverlayAnchor` 위치 | 작품 오른쪽 끝 + 0.15m 여백, 높이는 작품 중심 (바닥에 묻히지 않게 보정) |
+| `InteractionArea` 크기 | 작품 Bounds + 사방 0.15m (정면 법선축은 최소 0.3m) |
+| `OverlayAnchor` 위치 | 작품 옆 끝 + 0.15m 여백, 높이는 작품 중심 (바닥에 묻히지 않게 보정) |
+| `OverlayAnchor` 방향 | Panel 의 **글자가 읽히는 면**이 관람자(작품 정면) 쪽을 향하도록 회전 |
 | `Title KR` | 원본 오브젝트 이름 (EN/JP 는 비워 두어 KR 로 fallback) |
 | 참조 연결 / Interact 값 | Setup 까지 자동 실행 |
 
