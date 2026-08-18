@@ -19,6 +19,7 @@ using VRC.Udon;
 ///   - Create Exhibits From Selected Meshes : 선택한 Mesh 를 작품으로 일괄 변환 (ExhibitDescriptorBatchTools.cs)
 ///   - Setup Selected Exhibits           : 선택한 작품들의 참조 자동 연결 + Interact 값 반영
 ///   - Setup All Exhibits In Scene       : 씬 전체 일괄 처리 (100개 이상일 때 사용)
+///   - Migrate Exhibits From 1.x         : 1.x 의 InteractionArea / OverlayAnchor 제거
 ///   - Auto Setup On Save                : 저장할 때 자동으로 Setup 실행 (ExhibitDescriptorBatchTools.cs)
 ///   - Validate Scene                    : 누락된 참조/Collider 를 콘솔에 보고
 ///
@@ -32,6 +33,15 @@ public static partial class ExhibitDescriptorTools
     private const float PanelWidth = 600f;
     private const float PanelHeight = 440f;
     private const float CanvasScale = 0.001f;
+
+    // 아이콘 Canvas 의 로컬 단위(px). 실제 크기는 localScale = iconSize / IconCanvasSize 로 맞춥니다.
+    private const float IconCanvasSize = 100f;
+
+    /// <summary>아이콘 Collider 를 렌더 크기의 몇 배로 잡을지. 데스크톱 조준 편의를 위한 값입니다.</summary>
+    private const float IconColliderScale = 1.75f;
+
+    /// <summary>아이콘 Collider 의 최소 한 변(m). 8cm 아이콘을 마우스로 정확히 조준하기는 어렵습니다.</summary>
+    private const float IconColliderMinimum = 0.14f;
 
     // =====================================================================
     // 1. ExhibitionRoot + ExhibitManager
@@ -142,27 +152,10 @@ public static partial class ExhibitDescriptorTools
         // 투명 전용 머티리얼로 바꿔 "아직 비어 있는 자리" 로 두고, 실제 작품 Mesh 로 교체하게 합니다.
         ApplyPlaceholderMaterial(artwork);
 
-        // ---- InteractionArea --------------------------------------------
-        // Interact 는 Collider 와 UdonBehaviour 가 같은 GameObject 일 때 가장 안전합니다.
-        // 그래서 판정 전용 릴레이를 여기에 함께 둡니다.
-        GameObject interactionArea = new GameObject("InteractionArea");
-        interactionArea.transform.SetParent(root.transform, false);
-        interactionArea.transform.localPosition = new Vector3(0f, 1.5f, 0f);
-        interactionArea.layer = 0; // Default
-        BoxCollider box = interactionArea.AddComponent<BoxCollider>();
-        box.size = new Vector3(1.2f, 1.2f, 0.3f);
-        box.isTrigger = true;
-        interactionArea.AddUdonSharpComponent<ExhibitInteractRelay>();
-
-        // ---- OverlayAnchor (작품 옆) -------------------------------------
-        GameObject anchor = new GameObject("OverlayAnchor");
-        anchor.transform.SetParent(root.transform, false);
-        anchor.transform.localPosition = new Vector3(0.9f, 1.5f, 0f);
-        // Placeholder 작품은 로컬 +Z 를 정면으로 보므로 관람자도 +Z 쪽에 섭니다.
-        // World Space Canvas 는 forward(+Z) 의 <반대쪽>에서 글자가 정방향으로 읽히므로
-        // Panel 의 forward 는 -Z(관람자 반대쪽)여야 합니다. identity 로 두면 뒷면을 보여 줘
-        // 글자가 좌우 반전됩니다. (같은 규약: ExhibitDescriptorBatchTools.GetOverlayRotation)
-        anchor.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+        // ---- InfoIcon (작품 옆, 기본 꺼짐) -------------------------------
+        // InteractionArea 와 OverlayAnchor 는 신규 작품에서 만들지 않습니다.
+        // 판정은 이 아이콘이 담당하고, 위치/회전은 런타임이 매 프레임 정합니다.
+        BuildInfoIcon(root.transform);
 
         // ---- Overlay -----------------------------------------------------
         GameObject overlayObject = BuildOverlay(root.transform);
@@ -183,6 +176,67 @@ public static partial class ExhibitDescriptorTools
         overlayObject.SetActive(false); // 닫힌 상태로 시작
 
         return root;
+    }
+
+    /// <summary>
+    /// ⓘ 아이콘을 만듭니다. World Space Canvas + CanvasGroup + 원형 Image + 라벨 + BoxCollider.
+    ///
+    /// <b>왜 "ⓘ"(U+24D8) 글자를 쓰지 않는가:</b> 본 폰트에도 fallback 에도 없는 글자는 □ 로 보입니다.
+    /// 실제로 닫기 버튼의 ✕(U+2715)가 그렇게 깨져 × (U+00D7)로 교체한 이력이 있습니다.
+    /// 그래서 원은 Unity 내장 스프라이트(Knob)로, 가운데 글자는 어느 폰트에나 있는 ASCII "i" 로 그립니다.
+    ///
+    /// 기본은 <c>SetActive(false)</c> 입니다. 꺼져 있으면 Collider 도 함께 죽으므로
+    /// 감상 중에는 Interact 대상이 아예 존재하지 않습니다.
+    /// (localPosition / localScale 은 자리표시자입니다. 위치는 런타임이, 크기는 Setup 이 정합니다)
+    /// </summary>
+    private static GameObject BuildInfoIcon(Transform parent)
+    {
+        GameObject iconObject = new GameObject("InfoIcon");
+        iconObject.transform.SetParent(parent, false);
+        iconObject.transform.localPosition = new Vector3(0.7f, 1.5f, 0f);
+        iconObject.layer = 0;                            // Default: Udon Interact 가 확실하게 인식하는 Layer
+
+        Canvas canvas = iconObject.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+
+        RectTransform rect = iconObject.GetComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(IconCanvasSize, IconCanvasSize);
+        rect.localScale = Vector3.one * (0.08f / IconCanvasSize);
+
+        iconObject.AddComponent<CanvasGroup>();
+
+        // 원형 배경
+        GameObject disc = CreateUIObject("Disc", iconObject.transform);
+        disc.layer = 0;
+        Stretch(disc.GetComponent<RectTransform>());
+        Image discImage = disc.AddComponent<Image>();
+        discImage.sprite = GetBuiltinSprite("UI/Skin/Knob.psd");
+        discImage.color = new Color(0.06f, 0.07f, 0.10f, 0.92f);
+        discImage.raycastTarget = false;
+
+        // 가운데 "i"
+        GameObject labelObject = CreateUIObject("Label", iconObject.transform);
+        labelObject.layer = 0;
+        Stretch(labelObject.GetComponent<RectTransform>());
+        TextMeshProUGUI label = labelObject.AddComponent<TextMeshProUGUI>();
+        ConfigureText(label, 62f, FontStyles.Bold | FontStyles.Italic, TextAlignmentOptions.Center);
+        label.text = "i";
+
+        // Interact 는 Collider 와 UdonBehaviour 가 같은 GameObject 일 때 가장 안전합니다.
+        BoxCollider box = iconObject.AddComponent<BoxCollider>();
+        box.size = new Vector3(IconCanvasSize, IconCanvasSize, 10f);
+        box.isTrigger = true;
+
+        iconObject.AddUdonSharpComponent<ExhibitInfoIcon>();
+
+        iconObject.SetActive(false);   // 응시할 때만 런타임이 켭니다.
+        return iconObject;
+    }
+
+    /// <summary>Unity 내장 UI 스프라이트를 가져옵니다. 없으면 null (Image 는 흰 사각형으로 그려집니다).</summary>
+    private static Sprite GetBuiltinSprite(string path)
+    {
+        return AssetDatabase.GetBuiltinExtraResource<Sprite>(path);
     }
 
     // ---------------------------------------------------------------------
@@ -598,27 +652,33 @@ public static partial class ExhibitDescriptorTools
             if (overlay != null) overlayProperty.objectReferenceValue = overlay;
         }
 
-        // OverlayAnchor
-        SerializedProperty anchorProperty = so.FindProperty("overlayAnchor");
-        if (anchorProperty != null && anchorProperty.objectReferenceValue == null)
+        // InfoIcon: 이 작품의 유일한 Interact 대상입니다. 없으면 여기서 만들어 줍니다.
+        // (1.x 로 만든 작품이나 손으로 지운 작품도 Setup 한 번으로 정상 구성이 됩니다)
+        ExhibitInfoIcon infoIcon = interactable.GetComponentInChildren<ExhibitInfoIcon>(true);
+        if (infoIcon == null)
         {
-            Transform anchor = FindChildRecursive(interactable.transform, "OverlayAnchor");
-            if (anchor != null) anchorProperty.objectReferenceValue = anchor;
+            GameObject created = BuildInfoIcon(interactable.transform);
+            Undo.RegisterCreatedObjectUndo(created, "Create Info Icon");
+            infoIcon = created.GetComponent<ExhibitInfoIcon>();
+
+            Debug.Log("[ExhibitDescriptor] ⓘ 아이콘을 만들었습니다: " + GetPath(interactable.transform), interactable);
         }
 
-        // Interact 판정 릴레이 (InteractionArea) 수집
-        ExhibitInteractRelay[] relays = interactable.GetComponentsInChildren<ExhibitInteractRelay>(true);
-        SerializedProperty relayProperty = so.FindProperty("interactRelays");
-        if (relayProperty != null && relayProperty.isArray)
+        SerializedProperty iconProperty = so.FindProperty("infoIcon");
+        if (iconProperty != null && iconProperty.objectReferenceValue != (Object)infoIcon)
         {
-            relayProperty.arraySize = relays.Length;
-            for (int i = 0; i < relays.Length; i++)
-            {
-                relayProperty.GetArrayElementAtIndex(i).objectReferenceValue = relays[i];
-            }
+            // 비어 있을 때만 채우면 안 됩니다. 다른 작품에서 복제해 온 경우 예전 참조가 남아
+            // 엉뚱한 아이콘을 조작합니다.
+            iconProperty.objectReferenceValue = infoIcon;
         }
+
 
         so.ApplyModifiedProperties(); // Undo 지원 (Ctrl+Z 로 되돌릴 수 있음)
+
+        // 런타임이 아이콘을 놓는 데 쓰는 기하 정보는 **매번 다시 굽습니다.**
+        // 이것이 "Mesh 를 교체·이동·스케일해도 아이콘이 자동으로 따라온다" 의 실현 지점입니다.
+        // (1.0.x 는 생성 시점 값을 그대로 두어 작품을 건드리면 전부 어긋났습니다)
+        TryBakeExhibitGeometry(interactable);
 
         // UdonBehaviour 에 Interact 문구 / Proximity 를 직접 구워 넣습니다.
         float proximity = GetFloat(so, "interactionProximity", 2f);
@@ -629,70 +689,106 @@ public static partial class ExhibitDescriptorTools
             interactText = manager != null ? manager.defaultInteractionTextKR : "설명";
         }
 
-        BakeInteractSettings(interactable, interactText, proximity);
-
-        // 릴레이 쪽도 같은 값으로 맞추고 target 을 연결합니다.
-        for (int i = 0; i < relays.Length; i++)
-        {
-            SetupRelay(relays[i], interactable, interactText, proximity);
-        }
-
-        // Scene View 와 런타임 위치가 어긋나지 않도록 Overlay 를 Anchor 로 미리 스냅합니다.
-        SnapOverlayToAnchor(interactable);
+        // 아이콘 참조 연결 + iconSize 굽기 (Interact 문구/거리도 아이콘에 굽습니다)
+        SetupInfoIcon(infoIcon, interactable, interactText, proximity);
 
         EditorUtility.SetDirty(interactable);
         UdonSharpEditorUtility.CopyProxyToUdon(interactable);
         RecordPrefabModifications(interactable);
     }
 
-    private static void SetupRelay(ExhibitInteractRelay relay, ExhibitInteractable target, string interactText, float proximity)
+    /// <summary>
+    /// 아이콘의 참조를 연결하고 <c>iconSize</c> 를 Scale / Collider 에 굽습니다.
+    ///
+    /// <c>iconSize</c> 만 에디터가 굽는 이유: 이 값은 아이콘의 실제 크기를 바꾸므로
+    /// Scene View 에서 눈으로 확인돼야 합니다. 나머지 아이콘 설정(방향/여백/높이/거리)은
+    /// 어차피 매 프레임 위치 계산에 쓰이므로 런타임이 Manager fallback 과 함께 해석합니다.
+    /// (덕분에 Manager 기본값을 바꾸면 Setup 을 다시 돌리지 않아도 즉시 반영됩니다)
+    /// </summary>
+    private static void SetupInfoIcon(ExhibitInfoIcon icon, ExhibitInteractable target,
+                                      string interactText, float proximity)
     {
-        if (relay == null) return;
+        if (icon == null) return;
 
-        SerializedObject so = new SerializedObject(relay);
+        SerializedObject so = new SerializedObject(icon);
 
         SerializedProperty targetProperty = so.FindProperty("target");
         if (targetProperty != null) targetProperty.objectReferenceValue = target;
 
+        AssignIfEmpty(so, "canvasGroup", icon.GetComponent<CanvasGroup>());
+
         so.ApplyModifiedProperties();
 
-        BakeInteractSettings(relay, interactText, proximity);
+        BakeInteractSettings(icon, interactText, proximity);
 
-        if (relay.GetComponent<Collider>() == null)
+        // ---- 크기 굽기 ----------------------------------------------------
+        float iconSize = ResolveIconSize(target);
+        float scale = iconSize / IconCanvasSize;
+
+        Transform iconTransform = icon.transform;
+        Vector3 wantedScale = new Vector3(scale, scale, scale);
+
+        if (iconTransform.localScale != wantedScale)
         {
-            Debug.LogError("[ExhibitDescriptor] InteractionArea 에 Collider 가 없습니다: " + GetPath(relay.transform), relay);
+            Undo.RecordObject(iconTransform, "Bake Icon Size");
+            iconTransform.localScale = wantedScale;
+            RecordPrefabModifications(iconTransform);
         }
 
-        if (relay.gameObject.layer != 0) relay.gameObject.layer = 0;
+        BoxCollider box = icon.GetComponent<BoxCollider>();
+        if (box == null)
+        {
+            box = Undo.AddComponent<BoxCollider>(icon.gameObject);
+            box.isTrigger = true;
+            Debug.LogWarning("[ExhibitDescriptor] 아이콘에 BoxCollider 를 자동 추가했습니다: " +
+                             GetPath(icon.transform), icon);
+        }
 
-        EditorUtility.SetDirty(relay);
-        UdonSharpEditorUtility.CopyProxyToUdon(relay);
-        RecordPrefabModifications(relay);
+        // 조준 편의를 위해 렌더 크기보다 크게 잡습니다. (m -> Canvas 로컬 단위로 환산)
+        float colliderMeters = Mathf.Max(iconSize * IconColliderScale, IconColliderMinimum);
+        float colliderLocal = colliderMeters / scale;
+        Vector3 wantedSize = new Vector3(colliderLocal, colliderLocal, 10f);
+
+        if (box.size != wantedSize)
+        {
+            Undo.RecordObject(box, "Bake Icon Collider");
+            box.size = wantedSize;
+            box.center = Vector3.zero;
+            RecordPrefabModifications(box);
+        }
+
+        if (icon.gameObject.layer != 0) icon.gameObject.layer = 0;
+
+        Canvas canvas = icon.GetComponent<Canvas>();
+        if (canvas != null && canvas.renderMode != RenderMode.WorldSpace)
+        {
+            canvas.renderMode = RenderMode.WorldSpace;
+        }
+
+        // 아이콘 라벨은 ASCII "i" 라 기본 폰트로도 보이지만, 전시 폰트와 모양을 맞춥니다.
+        ApplyOverlayFont(icon, FindOverlayFont(icon));
+
+        EditorUtility.SetDirty(icon);
+        UdonSharpEditorUtility.CopyProxyToUdon(icon);
+        RecordPrefabModifications(icon);
     }
 
-    /// <summary>Overlay 를 OverlayAnchor 의 위치/회전으로 에디터에서 미리 이동시킵니다.</summary>
-    private static void SnapOverlayToAnchor(ExhibitInteractable interactable)
+    /// <summary>작품의 iconSize 를 해석합니다. override 가 꺼져 있으면 같은 Scene 의 Manager 기본값입니다.</summary>
+    private static float ResolveIconSize(ExhibitInteractable interactable)
     {
         SerializedObject so = new SerializedObject(interactable);
 
-        SerializedProperty snapProperty = so.FindProperty("snapToAnchorOnOpen");
-        if (snapProperty != null && !snapProperty.boolValue) return;
+        SerializedProperty overrideProperty = so.FindProperty("overrideIconSettings");
+        if (overrideProperty != null && overrideProperty.boolValue)
+        {
+            float own = GetFloat(so, "iconSize", 0.08f);
+            return own > 0.001f ? own : 0.08f;
+        }
 
-        Object anchorObject = GetObject(so, "overlayAnchor");
-        Object overlayObject = GetObject(so, "overlay");
-        if (anchorObject == null || overlayObject == null) return;
+        ExhibitManager manager = FindManagerForScene(interactable);
+        if (manager != null && manager.defaultIconSize > 0.001f) return manager.defaultIconSize;
 
-        Transform anchor = anchorObject as Transform;
-        ExhibitOverlay overlay = overlayObject as ExhibitOverlay;
-        if (anchor == null || overlay == null) return;
-
-        Transform overlayTransform = overlay.transform;
-        if (overlayTransform.position == anchor.position && overlayTransform.rotation == anchor.rotation) return;
-
-        Undo.RecordObject(overlayTransform, "Snap Overlay To Anchor");
-        overlayTransform.position = anchor.position;
-        overlayTransform.rotation = anchor.rotation;
-        RecordPrefabModifications(overlayTransform);
+        return 0.08f;
     }
 
     /// <summary>
@@ -1037,6 +1133,111 @@ public static partial class ExhibitDescriptorTools
     }
 
     // =====================================================================
+    // 3.5. 1.x 구성 정리 (마이그레이션)
+    // =====================================================================
+
+    /// <summary>
+    /// 1.x 로 만든 작품에 남아 있는 <c>InteractionArea</c> / <c>OverlayAnchor</c> 를 제거하고
+    /// 응시형 구성으로 맞춥니다. 선택이 있으면 그 안의 작품만, 없으면 열려 있는 모든 Scene 이 대상입니다.
+    ///
+    /// 왜 Setup 이 아니라 별도 메뉴인가: Setup 은 <c>Auto Setup On Save</c> 로 저장 직전에도 돌아가고,
+    /// 저장 중에 GameObject 를 파괴하는 것은 위험합니다. 오브젝트를 <b>만드는</b> 일(아이콘 생성)은
+    /// Setup 이 하지만 <b>지우는</b> 일은 사람이 한 번 명시적으로 실행하게 둡니다.
+    ///
+    /// <c>ExhibitInteractRelay</c> 는 2.0 에서 삭제되었으므로 그 컴포넌트가 붙어 있던 오브젝트는
+    /// Missing Script 상태로 남습니다. Collider 는 그대로 살아 있어 Interact 레이를 가로막으므로
+    /// 반드시 정리해야 합니다.
+    /// </summary>
+    [MenuItem(MenuRoot + "Migrate Exhibits From 1.x", false, 40)]
+    public static void MigrateExhibitsFrom1x()
+    {
+        List<ExhibitInteractable> targets = CollectMigrationTargets();
+        if (targets.Count == 0)
+        {
+            Debug.LogWarning("[ExhibitDescriptor] 대상 작품이 없습니다. Hierarchy 에서 작품을 선택하거나 " +
+                             "작품이 있는 Scene 을 열어 두세요.");
+            return;
+        }
+
+        int undoGroup = Undo.GetCurrentGroup();
+        int removed = 0;
+
+        for (int i = 0; i < targets.Count; i++)
+        {
+            removed += RemoveLegacyParts(targets[i]);
+            SetupExhibitFull(targets[i]);          // 아이콘 생성 + 참조 연결 + 기하 굽기
+            MarkSceneDirtyFor(targets[i].gameObject);
+        }
+
+        Undo.SetCurrentGroupName("Migrate Exhibits From 1.x");
+        Undo.CollapseUndoOperations(undoGroup);
+
+        Debug.Log("[ExhibitDescriptor] 작품 " + targets.Count + " 개를 정리했습니다. " +
+                  "제거한 레거시 오브젝트 " + removed + " 개. " +
+                  "아이콘 위치는 런타임이 정하므로 수동 보정은 필요하지 않습니다. (Ctrl+Z 로 되돌릴 수 있습니다)");
+    }
+
+    private static List<ExhibitInteractable> CollectMigrationTargets()
+    {
+        List<ExhibitInteractable> result = new List<ExhibitInteractable>();
+        GameObject[] selection = Selection.gameObjects;
+
+        if (selection != null && selection.Length > 0)
+        {
+            for (int i = 0; i < selection.Length; i++)
+            {
+                if (selection[i] == null) continue;
+
+                ExhibitInteractable[] found = selection[i].GetComponentsInChildren<ExhibitInteractable>(true);
+                for (int j = 0; j < found.Length; j++)
+                {
+                    if (!result.Contains(found[j])) result.Add(found[j]);
+                }
+            }
+
+            return result;
+        }
+
+        ExhibitInteractable[] all = Object.FindObjectsOfType<ExhibitInteractable>(true);
+        for (int i = 0; i < all.Length; i++)
+        {
+            if (!result.Contains(all[i])) result.Add(all[i]);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// <c>InteractionArea</c> / <c>OverlayAnchor</c> 자식을 제거하고 개수를 돌려줍니다.
+    ///
+    /// 이름으로만 지웁니다. 사용자가 다른 이름으로 만들어 둔 판정 영역이나 물리 충돌용 Collider 를
+    /// 도구가 임의로 지우지 않기 위해서입니다. 남은 것은 <see cref="ValidateScene"/> 이 경고합니다.
+    /// </summary>
+    private static int RemoveLegacyParts(ExhibitInteractable interactable)
+    {
+        int removed = 0;
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            string name = pass == 0 ? "InteractionArea" : "OverlayAnchor";
+
+            // 같은 이름이 여러 개일 수 있어 없어질 때까지 반복합니다.
+            while (true)
+            {
+                Transform found = FindChildRecursive(interactable.transform, name);
+                if (found == null || found == interactable.transform) break;
+
+                Debug.Log("[ExhibitDescriptor] 레거시 오브젝트를 제거했습니다: " + GetPath(found), interactable);
+                Undo.DestroyObjectImmediate(found.gameObject);
+                removed++;
+            }
+        }
+
+        return removed;
+    }
+
+
+    // =====================================================================
     // 4. Validate
     // =====================================================================
 
@@ -1153,11 +1354,6 @@ public static partial class ExhibitDescriptorTools
                 errors++;
             }
 
-            if (GetObject(so, "overlayAnchor") == null)
-            {
-                Debug.LogWarning("[ExhibitDescriptor] overlayAnchor 미연결(Overlay 현재 위치를 그대로 사용): " + path, exhibit);
-            }
-
             // Placeholder 는 완전히 투명해서 Scene View 만 봐서는 교체를 잊은 것을 알 수 없습니다.
             // 일부러 비워 두는 경우도 있으므로 에러가 아니라 경고로만 알립니다.
             if (UsesPlaceholderMaterial(exhibit))
@@ -1166,36 +1362,77 @@ public static partial class ExhibitDescriptorTools
                                  "실제 작품 Mesh/Material 로 교체하세요: " + path, exhibit);
             }
 
-            // Interact 는 Collider 와 UdonBehaviour 가 같은 GameObject 여야 안전합니다.
-            bool selfInteractable = exhibit.GetComponent<Collider>() != null;
+            // -------------------------------------------------------------
+            // Interact 수단 검사. 판정은 ⓘ 아이콘 하나만 받습니다.
+            // (작품 정면에는 판정 영역이 없어야 정상입니다 - 그게 이 설계의 요점입니다)
+            // -------------------------------------------------------------
+            ExhibitInfoIcon icon = exhibit.GetComponentInChildren<ExhibitInfoIcon>(true);
 
-            ExhibitInteractRelay[] relays = exhibit.GetComponentsInChildren<ExhibitInteractRelay>(true);
-            bool relayInteractable = false;
-
-            for (int r = 0; r < relays.Length; r++)
+            if (icon == null)
             {
-                if (relays[r].GetComponent<Collider>() != null) relayInteractable = true;
-
-                SerializedObject relaySo = new SerializedObject(relays[r]);
-                if (GetObject(relaySo, "target") == null)
+                Debug.LogError("[ExhibitDescriptor] ⓘ 아이콘이 없어 설명을 열 방법이 없습니다. " +
+                               "Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 실행하면 만들어집니다: " +
+                               path, exhibit);
+                errors++;
+            }
+            else
+            {
+                if (icon.GetComponent<Collider>() == null)
                 {
-                    Debug.LogError("[ExhibitDescriptor] InteractRelay 의 target 이 비어 있습니다: " + GetPath(relays[r].transform), relays[r]);
+                    Debug.LogError("[ExhibitDescriptor] ⓘ 아이콘에 Collider 가 없어 Interact 할 수 없습니다: " +
+                                   GetPath(icon.transform), icon);
                     errors++;
+                }
+
+                Canvas iconCanvas = icon.GetComponent<Canvas>();
+                if (iconCanvas == null || iconCanvas.renderMode != RenderMode.WorldSpace)
+                {
+                    Debug.LogError("[ExhibitDescriptor] ⓘ 아이콘이 World Space Canvas 가 아닙니다: " +
+                                   GetPath(icon.transform), icon);
+                    errors++;
+                }
+
+                SerializedObject iconSo = new SerializedObject(icon);
+                if (GetObject(iconSo, "target") == null)
+                {
+                    Debug.LogError("[ExhibitDescriptor] ⓘ 아이콘의 target 이 비어 있습니다: " +
+                                   GetPath(icon.transform), icon);
+                    errors++;
+                }
+                if (GetObject(iconSo, "canvasGroup") == null)
+                {
+                    Debug.LogWarning("[ExhibitDescriptor] ⓘ 아이콘에 CanvasGroup 이 없어 페이드가 생략됩니다: " +
+                                     GetPath(icon.transform), icon);
+                }
+
+                // 기하가 0 이면 런타임이 아이콘 로직을 건너뜁니다 = 아이콘이 영영 뜨지 않습니다.
+                SerializedProperty extentsProperty = so.FindProperty("boundsExtentsLocal");
+                if (extentsProperty == null || extentsProperty.vector3Value.sqrMagnitude <= 0f)
+                {
+                    Debug.LogError("[ExhibitDescriptor] 기하 정보가 비어 있어 아이콘이 뜨지 않습니다. " +
+                                   "작품 Mesh(Renderer)가 있는지 확인하고 Setup 을 실행하세요: " + path, exhibit);
+                    errors++;
+                }
+
+                if (icon.gameObject.activeSelf)
+                {
+                    Debug.LogWarning("[ExhibitDescriptor] ⓘ 아이콘이 활성 상태로 저장되어 있습니다. " +
+                                     "비활성으로 저장하는 것을 권장합니다: " + GetPath(icon.transform), icon);
                 }
             }
 
-            if (!selfInteractable && !relayInteractable)
+            // 작품 정면을 덮는 Collider 는 감상을 방해합니다. (1.x 의 InteractionArea 잔재 포함)
+            Collider[] strayColliders = exhibit.GetComponentsInChildren<Collider>(true);
+            for (int c = 0; c < strayColliders.Length; c++)
             {
-                if (exhibit.GetComponentInChildren<Collider>(true) != null)
-                {
-                    Debug.LogError("[ExhibitDescriptor] Collider 가 자식에만 있고 그 GameObject 에 UdonBehaviour 가 없습니다. " +
-                                   "해당 오브젝트에 ExhibitInteractRelay 를 붙이거나 Collider 를 작품 Root 로 옮기세요: " + path, exhibit);
-                }
-                else
-                {
-                    Debug.LogError("[ExhibitDescriptor] Interact 용 Collider 가 없습니다: " + path, exhibit);
-                }
-                errors++;
+                Collider stray = strayColliders[c];
+                if (stray == null) continue;
+                if (icon != null && stray.transform.IsChildOf(icon.transform)) continue;
+                if (stray.GetComponentInParent<ExhibitOverlay>(true) != null) continue;   // Overlay 버튼
+
+                Debug.LogWarning("[ExhibitDescriptor] 작품 안에 아이콘/Overlay 가 아닌 Collider 가 있습니다. " +
+                                 "Interact 레이가 여기에 먼저 막히면 아이콘을 클릭할 수 없습니다: " +
+                                 GetPath(stray.transform), stray);
             }
         }
 
@@ -1474,6 +1711,18 @@ public static partial class ExhibitDescriptorTools
         if (property != null) property.stringValue = value;
     }
 
+    private static void SetVector3(SerializedObject so, string propertyName, Vector3 value)
+    {
+        SerializedProperty property = so.FindProperty(propertyName);
+        if (property != null) property.vector3Value = value;
+    }
+
+    private static void SetInt(SerializedObject so, string propertyName, int value)
+    {
+        SerializedProperty property = so.FindProperty(propertyName);
+        if (property != null) property.intValue = value;
+    }
+
     private static void SetEnum(SerializedObject so, string propertyName, int value)
     {
         SerializedProperty property = so.FindProperty(propertyName);
@@ -1493,8 +1742,9 @@ public static partial class ExhibitDescriptorTools
     /// <c>localScale = 1</c> 로 두면 부모의 Scale 이 그대로 상속됩니다. 그러면 작품의 월드 위치는
     /// 맞더라도 World Space Canvas(<see cref="CanvasScale"/> = 0.001)와 InteractionArea 까지 함께
     /// 커지거나 작아지고, 부모가 비균일 Scale 이면 Panel 의 글자가 찌그러집니다.
-    /// Overlay 크기와 여백(<c>OverlayGap</c>, <c>InteractionPadding</c>)은 전부 m 단위 상수라
+    /// Overlay 크기와 아이콘 값(<c>iconGap</c> / <c>iconSize</c>)은 전부 m 단위라
     /// Root 의 월드 Scale 이 1 이어야 의도한 크기가 나옵니다.
+    /// (런타임의 아이콘 배치도 굽힌 extents 를 m 로 해석하므로 이 불변식에 기댑니다)
     /// </summary>
     private static void NeutralizeWorldScale(Transform exhibitRoot)
     {

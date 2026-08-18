@@ -20,12 +20,6 @@ public static partial class ExhibitDescriptorTools
     // 5. 선택한 Mesh 로 작품 일괄 생성
     // =====================================================================
 
-    /// <summary>InteractionArea BoxCollider 를 작품 Bounds 보다 얼마나 키울지 (m, 한쪽 기준).</summary>
-    private const float InteractionPadding = 0.15f;
-
-    /// <summary>작품 옆면과 Overlay Panel 사이의 여백 (m).</summary>
-    private const float OverlayGap = 0.15f;
-
     [MenuItem(MenuRoot + "Create Exhibits From Selected Meshes", false, 12)]
     public static void CreateExhibitsFromSelectedMeshes()
     {
@@ -160,12 +154,11 @@ public static partial class ExhibitDescriptorTools
 
         WarnAboutArtworkColliders(source);
 
-        FitExhibitToBounds(exhibit, source);
-
         ExhibitInteractable interactable = exhibit.GetComponent<ExhibitInteractable>();
         SetArtworkTitle(interactable, source.name);
 
-        // 참조 연결과 Interact 값 굽기는 최종 위치에 자리 잡은 뒤에 합니다.
+        // 참조 연결 / 기하 굽기 / Interact 값 굽기는 최종 위치에 자리 잡은 뒤에 합니다.
+        // (기하는 SetupExhibitFull 안에서 매번 다시 구우므로 여기서 따로 계산하지 않습니다)
         SetupExhibitFull(interactable);
         MarkSceneDirtyFor(exhibit);
 
@@ -215,168 +208,126 @@ public static partial class ExhibitDescriptorTools
     }
 
     /// <summary>
-    /// 작품 Bounds 에 맞춰 InteractionArea 의 BoxCollider 와 OverlayAnchor 위치/방향을 계산합니다.
-    /// 계산은 전부 Exhibit Root 의 로컬 좌표에서 합니다. (Root 가 회전해 있어도 안전)
+    /// 런타임이 아이콘을 배치하는 데 필요한 <b>기하 정보 세 개</b>를 작품에 굽습니다.
+    /// (중심 / extents / 얇은 축. 전부 Exhibit Root 의 로컬 좌표라 Root 가 회전해 있어도 안전)
     ///
-    /// <b>축을 하드코딩하지 않습니다.</b> 예전에는 "얇은 축 = 로컬 Z, 옆방향 = 로컬 X" 라고 전제했는데,
-    /// 벽에 걸린 액자는 로컬 X 가 얇은 경우가 흔합니다(= 작품 정면 법선이 X). 그 작품에서는
-    /// Panel 이 그림 정면으로 튀어나와 작품을 가리고, 관람자에게는 Panel 이 옆면(선)으로만 보였습니다.
-    /// <see cref="ExhibitOverlay"/> 에는 빌보드/LookAt 이 없어 런타임에도 보정되지 않으므로
-    /// 여기서 정한 위치/회전이 그대로 최종 결과입니다.
+    /// 사람이 손으로 고칠 값이 아니므로 <b>실행될 때마다 무조건 덮어씁니다.</b>
+    /// 그래서 작품 Mesh 를 교체·이동·스케일해도 아이콘이 자동으로 따라갑니다.
+    ///
+    /// <paramref name="bounds"/> 는 <b>작품 Mesh 만</b>의 Bounds 여야 합니다. Overlay 는 Canvas/TMP 라
+    /// Renderer 를 가지므로 반드시 걸러야 합니다. <see cref="CollectArtworkRenderers"/> 가 담당합니다.
     /// </summary>
-    private static void FitExhibitToBounds(GameObject exhibit, GameObject source)
+    private static void BakeExhibitGeometry(ExhibitInteractable interactable, Bounds bounds)
     {
-        Bounds bounds;
-        if (!TryGetLocalBounds(exhibit.transform, source, out bounds))
-        {
-            Debug.LogWarning("[ExhibitDescriptor] Bounds 를 계산하지 못해 기본 크기로 둡니다: " + GetPath(source.transform), source);
-            return;
-        }
+        if (interactable == null) return;
 
-        int normalAxis = GetFrontNormalAxis(bounds.size);
-        int pushAxis = GetOverlayPushAxis(bounds.size, normalAxis);
+        SerializedObject so = new SerializedObject(interactable);
 
-        // ---- InteractionArea: 작품을 덮는 판정 박스 ------------------------
-        Transform area = exhibit.transform.Find("InteractionArea");
-        if (area != null)
-        {
-            area.localPosition = bounds.center;
+        SetVector3(so, "boundsCenterLocal", bounds.center);
+        SetVector3(so, "boundsExtentsLocal", bounds.extents);
+        SetInt(so, "thinAxis", GetThinAxis(bounds.size));
 
-            BoxCollider box = area.GetComponent<BoxCollider>();
-            if (box != null) box.size = GetInteractionSize(bounds.size, normalAxis);
-        }
-
-        // ---- OverlayAnchor: 작품 옆에 Panel 이 겹치지 않게 배치 ------------
-        Transform anchor = exhibit.transform.Find("OverlayAnchor");
-        if (anchor != null)
-        {
-            float panelHalfWidth = PanelWidth * CanvasScale * 0.5f;
-            float panelHalfHeight = PanelHeight * CanvasScale * 0.5f;
-
-            Vector3 position = bounds.center;
-            position[pushAxis] = bounds.center[pushAxis] + bounds.extents[pushAxis] + OverlayGap + panelHalfWidth;
-            // 낮은 좌대/조각은 중심에 맞추면 Panel 아래쪽이 바닥에 묻힙니다.
-            position.y = Mathf.Max(bounds.center.y, bounds.min.y + panelHalfHeight);
-
-            anchor.localPosition = position;
-            anchor.localRotation = GetOverlayRotation(normalAxis, pushAxis);
-        }
+        so.ApplyModifiedProperties();
+        EditorUtility.SetDirty(interactable);
     }
 
     /// <summary>
-    /// 작품의 "정면 법선축" (0 = X, 1 = Y, 2 = Z) 을 고릅니다. 로컬 Bounds 에서 <b>가장 얇은 축</b>입니다.
-    ///
-    /// 액자·그림·안내판은 두께가 가장 얇은 축이 곧 정면이 바라보는 축입니다.
-    /// 부호(+/-)까지는 Bounds 만으로 알 수 없으므로 <b>+ 방향을 정면으로 봅니다.</b>
-    /// Exhibit Root 는 원본 Mesh 의 회전을 그대로 물려받으므로, 작품이 로컬 +축을 관람자 쪽으로
-    /// 두고 배치돼 있으면 그대로 맞습니다. 반대로 배치된 작품은 생성 후 OverlayAnchor 를
-    /// 180도 돌려 주면 됩니다 - Setup 은 Anchor 를 다시 계산하지 않으므로 그 수정이 유지됩니다.
-    ///
-    /// 두께가 같으면 X → Y → Z 순으로 먼저 오는 축을 씁니다. (정육면체는 X 가 법선축)
+    /// 작품의 Bounds 를 구해 굽습니다. 대상 Renderer 가 하나도 없으면 <b>굽지 않고</b>
+    /// 기존 값을 유지한 뒤 경고합니다. (0 으로 밀어 버리면 이미 잘 놓인 아이콘이 작품 중심에 박힙니다)
     /// </summary>
-    private static int GetFrontNormalAxis(Vector3 size)
+    private static bool TryBakeExhibitGeometry(ExhibitInteractable interactable)
+    {
+        if (interactable == null) return false;
+
+        Renderer[] renderers = CollectArtworkRenderers(interactable);
+
+        Bounds bounds;
+        if (renderers.Length == 0 || !TryGetLocalBounds(interactable.transform, renderers, out bounds))
+        {
+            Debug.LogWarning("[ExhibitDescriptor] 작품 Mesh 의 Bounds 를 구하지 못해 기하 정보를 그대로 둡니다: " +
+                             GetPath(interactable.transform) +
+                             "\nExhibit 아래에 작품 Mesh(Renderer)가 있는지 확인하세요. " +
+                             "(Overlay / InfoIcon 의 Renderer 는 대상이 아닙니다)", interactable);
+            return false;
+        }
+
+        BakeExhibitGeometry(interactable, bounds);
+        return true;
+    }
+
+    /// <summary>
+    /// Bounds 계산 대상 Renderer: Exhibit 하위 전부에서 <see cref="ExhibitOverlay"/> 와
+    /// <see cref="ExhibitInfoIcon"/> 하위를 제외한 것입니다.
+    ///
+    /// Overlay 는 World Space Canvas + TMP 라 Renderer 를 가집니다. 걸러내지 않으면 Panel 크기가
+    /// 작품 Bounds 에 섞여 아이콘이 엉뚱하게 멀리 놓입니다.
+    /// </summary>
+    private static Renderer[] CollectArtworkRenderers(ExhibitInteractable interactable)
+    {
+        List<Renderer> result = new List<Renderer>();
+
+        Renderer[] all = interactable.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < all.Length; i++)
+        {
+            Renderer renderer = all[i];
+            if (renderer == null) continue;
+            if (renderer.GetComponentInParent<ExhibitOverlay>(true) != null) continue;
+            if (renderer.GetComponentInParent<ExhibitInfoIcon>(true) != null) continue;
+
+            result.Add(renderer);
+        }
+
+        return result.ToArray();
+    }
+
+    /// <summary>
+    /// 작품 로컬 Bounds 에서 <b>가장 얇은 축</b>(0 = X, 1 = Y, 2 = Z)을 고릅니다.
+    /// 액자·그림·안내판은 두께가 가장 얇은 축이 곧 정면이 바라보는 축입니다.
+    /// 두께가 같으면 X → Y → Z 순으로 먼저 오는 축을 씁니다. (정육면체는 X)
+    ///
+    /// <b>부호(+/-)는 추측하지 않습니다.</b> 부호는 런타임이 플레이어 머리 위치로 정합니다
+    /// (<c>ExhibitInteractable._TickIcon</c> 의 <c>side</c>). 이것이 1.1 의 핵심 변경입니다.
+    ///
+    /// <b>왜 이렇게 바뀌었나 (1.0.x 의 회귀 이력)</b>
+    ///  - 예전 <c>GetFrontNormalAxis</c> 는 Bounds 만으로 부호를 알 수 없어 <b>항상 + 를 정면으로
+    ///    가정</b>했습니다. 작품이 로컬 -축을 관람자 쪽으로 두고 배치돼 있으면 그대로 틀렸고,
+    ///    사람이 <c>OverlayAnchor</c> 를 180도 돌려 고쳐야 했습니다.
+    ///  - 그 부호가 캔버스 규약(<c>GetOverlayRotation</c>)과 맞물려 Panel 이 뒤집혀 나왔습니다.
+    ///    재검증 #3 실기에서 세 케이스 모두 글자가 좌우 반전됐고 dot 이 +2.5 / +2.5 / +1.45 로
+    ///    양수였는데도 <c>Vector3.Angle(forward, 정면) ≈ 0</c> 검증은 전부 통과했습니다.
+    ///    <b>각도만 보는 검증은 180도 뒤집힌 Panel 을 잡지 못합니다.</b> 스크린샷에서 글자가
+    ///    실제로 읽히는지 눈으로 보는 것만 검증으로 인정합니다.
+    ///  - 또 배치 값이 <b>생성 시점 Bounds 로 한 번 구워지고</b> Setup 이 다시 계산하지 않아
+    ///    (사용자의 수동 보정을 보존하려는 의도였습니다) Mesh 를 교체·이동·스케일하면 전부
+    ///    어긋났습니다. 이제 굽는 값은 배치 결과가 아니라 <b>기하</b>라서 사람이 고칠 값이 아니고,
+    ///    그래서 <see cref="BakeExhibitGeometry"/> 가 저장할 때마다 무조건 덮어씁니다.
+    /// </summary>
+    private static int GetThinAxis(Vector3 size)
     {
         if (size.x <= size.y && size.x <= size.z) return 0;
         if (size.y <= size.z) return 1;
         return 2;
     }
 
-    /// <summary>
-    /// Panel 을 밀어낼 축을 고릅니다. "법선축과 수직인 <b>수평</b>축 중 넓은 쪽" 입니다.
-    ///
-    /// 로컬 Y 는 위/아래라 후보에서 뺍니다. 그래서 실제로는
-    ///  - 법선축이 X → 남는 수평축은 Z 하나,
-    ///  - 법선축이 Z → X 하나로 결정됩니다. (예전 동작과 같아 회귀가 없습니다)
-    ///  - 법선축이 <b>Y</b> 인 경우(바닥에 눕힌 좌대/평면 작품)에만 X 와 Z 가 모두 수평이라
-    ///    선택지가 생깁니다. 이때는 <b>넓은 쪽</b>으로 밀어냅니다. 긴 변을 따라 옆으로 비켜서야
-    ///    작품 위를 덜 가리기 때문입니다. 두 값이 같으면 X 입니다.
-    ///
-    /// "수평" 판단은 Exhibit Root 의 로컬 축 기준입니다. Root 는 원본의 회전을 물려받으므로
-    /// 작품이 심하게 기울어 놓여 있으면 로컬 Y 도 그만큼 기웁니다. (똑바로 선 작품이 기준)
-    /// </summary>
-    private static int GetOverlayPushAxis(Vector3 size, int normalAxis)
+    /// <summary>source 하위의 모든 Renderer 를 모아 아래 오버로드로 넘깁니다.</summary>
+    private static bool TryGetLocalBounds(Transform space, GameObject source, out Bounds bounds)
     {
-        if (normalAxis == 1) return size.x >= size.z ? 0 : 2;
-        return normalAxis == 0 ? 2 : 0;
+        return TryGetLocalBounds(space, source.GetComponentsInChildren<Renderer>(true), out bounds);
     }
 
     /// <summary>
-    /// InteractionArea BoxCollider 의 크기입니다.
-    /// 얇은 액자도 정면에서 확실히 잡히도록 <b>정면 법선축만</b> 최소 깊이를 크게(0.3m) 잡고,
-    /// 나머지 두 축은 최소 0.2m 입니다. 어느 축이든 작품 Bounds + 사방 <see cref="InteractionPadding"/> 은 보장합니다.
-    ///
-    /// (예전에는 이 최소 깊이가 Z 에 하드코딩돼 있어, X 가 얇은 액자는 깊이 보정을 받지 못하고
-    ///  엉뚱하게 폭이 부풀었습니다.)
-    /// </summary>
-    private static Vector3 GetInteractionSize(Vector3 size, int normalAxis)
-    {
-        Vector3 padded = size + Vector3.one * (InteractionPadding * 2f);
-
-        Vector3 minimum = new Vector3(0.2f, 0.2f, 0.2f);
-        minimum[normalAxis] = 0.3f;
-
-        return new Vector3(
-            Mathf.Max(padded.x, minimum.x),
-            Mathf.Max(padded.y, minimum.y),
-            Mathf.Max(padded.z, minimum.z));
-    }
-
-    /// <summary>
-    /// OverlayAnchor 의 로컬 회전입니다. Panel 의 <b>글자가 읽히는 면</b>이 관람자를 향하도록 세웁니다.
-    /// <see cref="ExhibitOverlay"/> 에는 빌보드가 없어 여기서 정한 방향이 런타임까지 그대로 갑니다.
-    ///
-    /// <b>부호 규약:</b> World Space Canvas 는 자기 <b>forward(+Z) 의 반대쪽</b>에 선 사람에게 글자가
-    /// 정방향으로 보입니다. (회전 없는 Canvas 가 -Z 에 놓인 기본 카메라에 정방향으로 보이는 그 구도입니다.
-    ///  그래서 UI 빌보드도 카메라를 <i>바라보게</i> 하지 않고 <c>canvas.forward = camera.forward</c> 로 맞춥니다.)
-    /// 즉 Panel 의 forward 는 관람자에게서 <b>멀어지는</b> 쪽이어야 하고, 판정식은
-    /// <c>dot(관람자 - Panel, Panel.forward) &lt; 0</c> 입니다.
-    ///
-    ///  - 법선축이 X / Z: 관람자는 작품 정면 쪽에 서 있으므로 forward 는 <b>작품 정면의 반대</b>입니다.
-    ///  - 법선축이 <b>Y</b> (바닥에 눕힌 좌대/평면 작품): 정면이 하늘이나 바닥을 향하므로
-    ///    그대로 따라가면 서 있는 관람자가 Panel 을 읽을 수 없습니다. 대신 Panel 을 밀어낸
-    ///    방향(<paramref name="pushAxis"/>) <b>바깥</b>에서 읽도록 수직으로 세웁니다.
-    ///    작품에서 멀어지는 쪽이라 Panel 이 작품을 가리지도 않습니다.
-    ///
-    /// 위쪽은 항상 로컬 +Y 입니다.
-    ///
-    /// (예전에는 관람자 쪽을 그대로 <c>LookRotation</c> 에 넘겨 <b>캔버스 뒷면</b>을 보여 줬습니다.
-    ///  재검증 #3 실기에서 세 케이스 모두 글자가 좌우 반전됐고 dot 이 +2.5 / +2.5 / +1.45 로 양수였습니다.
-    ///  각도만 보는 검증(<c>Vector3.Angle(forward, 정면) ≈ 0</c>)은 이 실수를 통과시킵니다.
-    ///  <b>법선축이 Z 인 작품도 이제 identity 가 아니라 Y 180도</b>입니다 — 그 전에 만든 Exhibit 은
-    ///  뒤집힌 Anchor 를 그대로 들고 있으므로 Anchor 를 180도 돌리거나 다시 생성해야 합니다.
-    ///  Setup 은 Anchor 를 다시 계산하지 않습니다.)
-    /// </summary>
-    private static Quaternion GetOverlayRotation(int normalAxis, int pushAxis)
-    {
-        // 관람자가 서 있는 쪽. (법선축이 Y 면 Panel 을 밀어낸 쪽에서 읽습니다)
-        Vector3 viewerSide = GetAxisVector(normalAxis == 1 ? pushAxis : normalAxis);
-
-        // Canvas 는 forward 의 반대쪽에서 읽히므로 관람자 쪽의 반대를 봅니다.
-        return Quaternion.LookRotation(-viewerSide, Vector3.up);
-    }
-
-    /// <summary>축 인덱스(0 = X, 1 = Y, 2 = Z)를 단위 벡터로 바꿉니다.</summary>
-    private static Vector3 GetAxisVector(int axis)
-    {
-        if (axis == 0) return Vector3.right;
-        if (axis == 1) return Vector3.up;
-        return Vector3.forward;
-    }
-
-    /// <summary>
-    /// source 의 모든 Renderer 를 감싸는 AABB 를 <paramref name="space"/> 의 로컬 좌표로 구합니다.
+    /// 주어진 Renderer 들을 감싸는 AABB 를 <paramref name="space"/> 의 로컬 좌표로 구합니다.
     ///
     /// 각 Renderer 의 **로컬(Mesh) Bounds** 8개 꼭짓점을 월드로 보낸 뒤 다시 space 로 가져옵니다.
     /// <see cref="Renderer.bounds"/>(월드 AABB)에서 출발하면 안 됩니다. 월드 AABB 는 이미 회전을
     /// 흡수해 부풀어 있는 상자라, 그 꼭짓점을 space 로 되돌리면 한 번 더 부풀어 오릅니다.
-    /// (예: Y 45도로 돌아간 두께 0.05m 액자 → 깊이가 1m 넘게 잡혀 InteractionArea 가 통로를 막고
-    ///  OverlayAnchor 도 작품에서 그만큼 멀어집니다.)
+    /// (예: Y 45도로 돌아간 두께 0.05m 액자 → 깊이가 1m 넘게 잡혀 아이콘이 작품에서 그만큼
+    ///  멀어집니다. 1.0.x 에서는 InteractionArea 가 통로까지 막았습니다.)
     /// </summary>
-    private static bool TryGetLocalBounds(Transform space, GameObject source, out Bounds bounds)
+    private static bool TryGetLocalBounds(Transform space, Renderer[] renderers, out Bounds bounds)
     {
         bounds = new Bounds();
 
-        Renderer[] renderers = source.GetComponentsInChildren<Renderer>(true);
         bool initialized = false;
 
         for (int i = 0; i < renderers.Length; i++)
@@ -459,7 +410,7 @@ public static partial class ExhibitDescriptorTools
     /// 작품 Mesh 에 남아 있는 Collider 를 경고합니다.
     ///
     /// 지우지 않고 알리기만 하는 이유: 사용자가 물리 충돌(벽처럼 막기)용으로 일부러 둔 것일 수 있습니다.
-    /// 다만 Interact 레이가 작품 Collider 에 먼저 맞으면 InteractionArea 가 반응하지 않으므로
+    /// 다만 Interact 레이가 작품 Collider 에 먼저 맞으면 ⓘ 아이콘이 반응하지 않으므로
     /// 방치하면 "클릭해도 아무 일도 없음" 의 원인이 됩니다.
     /// </summary>
     private static void WarnAboutArtworkColliders(GameObject source)
@@ -469,7 +420,7 @@ public static partial class ExhibitDescriptorTools
 
         Debug.LogWarning("[ExhibitDescriptor] 작품 Mesh 에 Collider 가 " + colliders.Length + " 개 있습니다: " +
                          GetPath(source.transform) + "\n" +
-                         "Interact 레이가 여기에 먼저 막히면 클릭이 InteractionArea 로 가지 않습니다. " +
+                         "Interact 레이가 여기에 먼저 막히면 ⓘ 아이콘을 클릭할 수 없습니다. " +
                          "물리 충돌 용도가 아니라면 제거하세요.", source);
     }
 

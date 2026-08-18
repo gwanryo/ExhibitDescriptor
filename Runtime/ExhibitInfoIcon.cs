@@ -12,8 +12,8 @@ using VRC.SDKBase;
 /// Collider 도 함께 죽습니다. 즉 Interact 대상이 <b>물리적으로 존재하지 않습니다</b> -
 /// "툴팁이 안 뜬다" 가 아니라 뜰 수가 없습니다. 감상 중 화면 중앙이 깨끗한 이유입니다.
 ///
-/// Interact 는 Collider 와 UdonBehaviour 가 같은 GameObject 일 때가 가장 안전하므로
-/// (<see cref="ExhibitInteractRelay"/> 와 같은 이유) 아이콘에 직접 붙입니다.
+/// Interact 는 Collider 와 UdonBehaviour 가 같은 GameObject 일 때 가장 안전하므로
+/// (자식 Collider 는 SDK 버전에 따라 인식되지 않을 수 있습니다) 아이콘에 직접 붙입니다.
 /// </summary>
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class ExhibitInfoIcon : UdonSharpBehaviour

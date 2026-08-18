@@ -6,14 +6,13 @@ using VRC.SDKBase;
 /// 작품 1개를 담당하는 컴포넌트. Exhibit Prefab 의 Root 에 붙입니다.
 ///
 /// - 작품 데이터(KR/EN/JP)를 자기 자신이 직접 보유합니다.
-/// - VRChat 기본 Interact 로 자기 Overlay 를 Toggle 합니다.
-/// - Update() 를 전혀 사용하지 않습니다. (애니메이션은 ExhibitManager 가 일괄 처리)
+/// - Update() 를 전혀 사용하지 않습니다. (Overlay 애니메이션과 아이콘 갱신은 ExhibitManager 가 일괄 처리)
 /// - Local Only: 네트워크 동기화를 사용하지 않습니다.
 ///
-/// Collider 안내
-///  - Interact 를 받으려면 이 컴포넌트가 붙은 GameObject "또는 그 자식" 에 Collider 가 있어야 합니다.
-///  - 권장: 자식 "InteractionArea" 오브젝트에 BoxCollider 를 두고 Mesh 와 분리합니다.
-///    (Artwork 의 MeshCollider 와 무관하게 클릭 영역을 자유롭게 조절할 수 있습니다.)
+/// <b>Interact 는 이 컴포넌트가 받지 않습니다.</b> 작품 정면에는 판정 영역이 없고,
+/// 응시할 때만 켜지는 자식 <see cref="ExhibitInfoIcon"/> 이 유일한 Interact 대상입니다.
+/// 그래서 작품을 감상하는 동안 화면 중앙에 툴팁도 하이라이트도 뜨지 않습니다.
+/// (아이콘의 위치/회전/페이드는 이 컴포넌트가 <see cref="_TickIcon"/> 에서 계산합니다)
 /// </summary>
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class ExhibitInteractable : UdonSharpBehaviour
@@ -29,14 +28,8 @@ public class ExhibitInteractable : UdonSharpBehaviour
     [Tooltip("이 작품 전용 Overlay. Prefab 내부에 있으므로 Prefab 안에서 연결됩니다.")]
     [SerializeField] private ExhibitOverlay overlay;
 
-    [Tooltip("Overlay 가 표시될 위치/방향. 기본값은 작품 옆입니다.")]
-    [SerializeField] private Transform overlayAnchor;
-
     [Tooltip("manager 가 비어 있을 때 GameObject.Find 로 찾을 오브젝트 이름.")]
     [SerializeField] private string managerObjectName = "ExhibitManager";
-
-    [Tooltip("Interact 판정을 대신 받는 자식 영역들(InteractionArea). Interact 문구/거리가 여기에도 적용됩니다.")]
-    [SerializeField] private ExhibitInteractRelay[] interactRelays = new ExhibitInteractRelay[0];
 
     // ---------------------------------------------------------------------
     // Exhibit Data (KR / EN / JP)
@@ -88,23 +81,18 @@ public class ExhibitInteractable : UdonSharpBehaviour
 
     // Editor 도구가 SerializedObject 로만 읽는 값이라 C# 코드에서는 참조되지 않습니다. (CS0414 억제)
 #pragma warning disable 0414
-    [Tooltip("Interact 가능 거리(m). 기본값 2m.\n" +
-             "Editor 도구(Setup)가 이 값을 UdonBehaviour 에 구워 넣습니다. 런타임 변경은 불가합니다.")]
+    [Tooltip("ⓘ 아이콘을 Interact 할 수 있는 거리(m). 기본값 2m.\n" +
+             "Editor 도구(Setup)가 이 값을 아이콘의 UdonBehaviour 에 구워 넣습니다. 런타임 변경은 불가합니다.")]
     [Min(0.1f)] [SerializeField] private float interactionProximity = 2f;
 #pragma warning restore 0414
-
-    [Header("Overlay 배치 (레거시 1.0.x 전용)")]
-    [Tooltip("Overlay 를 열 때 OverlayAnchor 의 위치/회전으로 스냅합니다. (방향 고정)\n" +
-             "ⓘ 아이콘이 있는 작품에서는 런타임이 아이콘 옆으로 배치하므로 이 값은 쓰이지 않습니다.")]
-    [SerializeField] private bool snapToAnchorOnOpen = true;
 
     // ---------------------------------------------------------------------
     // Info Icon
     // ---------------------------------------------------------------------
 
     [Header("Info Icon")]
-    [Tooltip("이 작품 옆에 뜨는 ⓘ 아이콘. 이 참조가 있으면 응시형(1.1+), 없으면 레거시(1.0.x) 방식으로 " +
-             "동작합니다. (Setup 이 자동 연결)")]
+    [Tooltip("이 작품 옆에 뜨는 ⓘ 아이콘. 이 작품의 유일한 Interact 대상입니다. " +
+             "(Setup 이 자동으로 만들고 연결합니다)")]
     [SerializeField] private ExhibitInfoIcon infoIcon;
 
     [Tooltip("아이콘이 작품의 어느 쪽에 붙을지. Default 면 ExhibitManager 의 값을 따릅니다.")]
@@ -132,8 +120,7 @@ public class ExhibitInteractable : UdonSharpBehaviour
     //
     // Setup 이 실행될 때마다 무조건 덮어씁니다. 굽는 것이 배치 "결과" 가 아니라 "기하" 라서
     // 사용자의 수동 보정을 보존할 이유가 없고, 그래서 작품 Mesh 를 교체·이동·스케일해도
-    // 아이콘이 자동으로 따라갑니다. (1.0.x 의 InteractionArea / OverlayAnchor 는 생성 시점
-    //  Bounds 에 고정돼 있었고 Setup 이 다시 계산하지 않아 전부 어긋났습니다)
+    // 아이콘이 자동으로 따라갑니다.
     //
     // iconSize 만 에디터가 함께 굽는 값입니다(아이콘 Scale/Collider). 나머지 아이콘 설정은
     // 어차피 매 프레임 위치 계산에 쓰이므로 런타임이 Manager fallback 과 함께 해석합니다.
@@ -207,20 +194,6 @@ public class ExhibitInteractable : UdonSharpBehaviour
         }
     }
 
-    /// <summary>
-    /// VRChat 기본 Interact. 같은 작품을 다시 누르면 Toggle 로 닫힙니다.
-    /// 다른 작품의 Overlay 에는 전혀 영향을 주지 않습니다.
-    /// </summary>
-    public override void Interact()
-    {
-        if (!Utilities.IsValid(overlay)) return;
-
-        _EnsureManager();
-
-        if (overlay.IsOpen) _CloseOverlay();
-        else _OpenOverlay();
-    }
-
     // ---------------------------------------------------------------------
     // Public API (버튼 / 다른 스크립트에서 호출 가능)
     // ---------------------------------------------------------------------
@@ -235,13 +208,6 @@ public class ExhibitInteractable : UdonSharpBehaviour
 
         GameObject overlayObject = overlay.gameObject;
         if (!overlayObject.activeSelf) overlayObject.SetActive(true);
-
-        if (snapToAnchorOnOpen && Utilities.IsValid(overlayAnchor))
-        {
-            Transform overlayTransform = overlayObject.transform;
-            overlayTransform.position = overlayAnchor.position;
-            overlayTransform.rotation = overlayAnchor.rotation; // 플레이어를 따라 회전하지 않는 고정 방향
-        }
 
         _PushContent();
         overlay._Open(manager);
@@ -452,7 +418,9 @@ public class ExhibitInteractable : UdonSharpBehaviour
         _EnsureManager();
 
         if (overlay.IsOpen) { _CloseOverlay(); return; }
-        _OpenOverlayAtIcon();
+
+        // _OpenOverlay 가 아이콘 자리 / 제자리 배치를 알아서 고릅니다. (분기를 한 곳에만 둡니다)
+        _OpenOverlay();
     }
 
     /// <summary>ExhibitManager 가 언어를 바꿀 때 호출합니다.</summary>
@@ -736,17 +704,6 @@ public class ExhibitInteractable : UdonSharpBehaviour
         if (Utilities.IsValid(infoIcon) && infoIcon.gameObject.activeInHierarchy)
         {
             infoIcon._SetInteractText(text);
-        }
-
-        // Interact 판정을 대신 받는 자식 영역(InteractionArea)에도 같은 값을 적용합니다.
-        if (interactRelays == null) return;
-
-        for (int i = 0; i < interactRelays.Length; i++)
-        {
-            ExhibitInteractRelay relay = interactRelays[i];
-            if (!Utilities.IsValid(relay)) continue;
-            if (!relay.gameObject.activeInHierarchy) continue;
-            relay._SetInteractText(text);
         }
     }
 
