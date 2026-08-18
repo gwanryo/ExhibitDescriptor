@@ -109,8 +109,12 @@ public class ExhibitInteractable : UdonSharpBehaviour
     [Tooltip("아이콘 높이 보정(m, 월드 Y). 음수도 정상 값입니다.")]
     [SerializeField] private float iconHeightOffset = 0f;
 
+    // interactionProximity 와 같은 이유로 C# 코드에서는 참조되지 않습니다. (CS0414 억제)
+    // Editor 의 Setup 이 SerializedObject 로 읽어 아이콘 Scale / Collider 에 구워 넣습니다.
+#pragma warning disable 0414
     [Tooltip("아이콘 한 변의 길이(m). Editor 의 Setup 이 아이콘 Scale/Collider 에 구워 넣습니다.")]
     [Min(0.01f)] [SerializeField] private float iconSize = 0.08f;
+#pragma warning restore 0414
 
     [Tooltip("이 거리(m) 밖에서는 아이콘이 뜨지 않습니다.")]
     [Min(0.5f)] [SerializeField] private float gazeDistance = 6f;
