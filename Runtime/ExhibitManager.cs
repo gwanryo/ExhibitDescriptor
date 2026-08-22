@@ -75,6 +75,22 @@ public class ExhibitManager : UdonSharpBehaviour
     [Tooltip("프레임당 근접 스캔 개수. 작품 100개면 한 바퀴에 약 13프레임(0.2초)입니다.")]
     [Min(1)] [SerializeField] private int iconScanPerFrame = 8;
 
+    [Tooltip("아이콘과 Panel 이 벽·작품 표면에서 최소한 이만큼 떨어집니다(m). " +
+             "관람자를 향해 기울어진 판이 벽에 잠기지 않도록, 필요한 깊이는 런타임이 벽을 재서 정합니다.")]
+    [Min(0f)] public float iconClearance = 0.02f;
+
+    /// <summary>
+    /// 아이콘/Panel 이 "벽" 으로 취급할 Layer 마스크입니다.
+    ///
+    /// <b>LayerMask 타입으로 두지 않는 이유:</b> UdonSharpBehaviour 의 직렬화 필드 타입은 Udon 타입
+    /// 화이트리스트(NodeRegistry)를 타므로, 검증되지 않은 타입을 올리면 프로젝트 전체 U# 컴파일이
+    /// 막힙니다(TMP_FontAsset 사고와 같은 경로). 그래서 사람이 고르는 LayerMask 는 같은 GameObject 의
+    /// <see cref="ExhibitDescriptorSettings"/> 에 두고, Editor 의 Setup 이 이 int 에 구워 넣습니다.
+    ///
+    /// 기본값은 Default(0) + Environment(11) = 1 + 2048 입니다.
+    /// </summary>
+    [HideInInspector] public int iconProbeLayerMask = 2049;
+
     // Overlay 폰트 슬롯(TMP_FontAsset)은 이 컴포넌트가 아니라 같은 GameObject 의
     // ExhibitDescriptorSettings(평범한 MonoBehaviour) 에 있습니다. 여기에 둘 수 없는 이유는
     // ExhibitDescriptorSettings 의 주석에 적어 두었습니다. (요약: Udon 타입 화이트리스트)
