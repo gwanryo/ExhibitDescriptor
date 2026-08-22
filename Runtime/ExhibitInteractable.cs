@@ -335,6 +335,16 @@ public class ExhibitInteractable : UdonSharpBehaviour
     {
         if (!_HasInfoIcon()) return;
 
+        // Panel 이 열려 있는 동안에는 위치를 다시 계산하지 않습니다.
+        // Panel 은 열린 자리에 고정되는데(스펙) 아이콘만 따라 움직이면 둘이 어긋나,
+        // 걸어 다니는 동안 아이콘이 Panel 을 뚫거나 Panel 뒤로 숨습니다.
+        // 표시/페이드 상태만 계속 관리합니다.
+        if (_IsOverlayOpen())
+        {
+            _ApplyIconVisual(true, deltaTime);
+            return;
+        }
+
         Vector3 center = _GetIconCenter();
         Vector3 toHead = headPosition - center;
 
@@ -790,7 +800,12 @@ public class ExhibitInteractable : UdonSharpBehaviour
         }
 
         infoIcon._SetAlpha(_iconAlpha);
-        infoIcon.transform.SetPositionAndRotation(_iconPosition, _iconRotation);
+
+        // 열려 있는 동안에는 _OpenOverlayAtIcon 이 정해 둔 자리를 유지합니다.
+        if (!_IsOverlayOpen())
+        {
+            infoIcon.transform.SetPositionAndRotation(_iconPosition, _iconRotation);
+        }
     }
 
     private float _StepAlpha(float current, float target, float deltaTime)
