@@ -150,6 +150,19 @@ public class ExhibitInteractable : UdonSharpBehaviour
     private Vector3 _iconDirection;      // 작품 중심 -> 아이콘. Panel 을 밀어낼 방향도 이것입니다.
     private string _interactText = "";
 
+    // 아이콘 자리의 "빈 구간". 정적 기하의 성질이라 자리가 옮겨갈 때만 다시 잽니다.
+    // 값이 음수면 "그 방향으로 아무것도 맞히지 못했다 = 제약 없음" 입니다.
+    private bool _corridorValid;
+    private Vector3 _corridorMeasuredAt;
+    private float _corridorBack = -1f;
+    private float _corridorFront = -1f;
+
+    /// <summary>빈 구간을 찾을 때 쏘는 거리(m). 벽은 가깝고, 못 맞히면 제약이 없다는 뜻입니다.</summary>
+    private const float ProbeDistance = 1f;
+
+    /// <summary>아이콘 자리가 이만큼(m) 옮겨가면 다시 잽니다. (걸어서 이동했을 때)</summary>
+    private const float RemeasureDistance = 0.15f;
+
     // ---------------------------------------------------------------------
     // Unity / Udon Events
     // ---------------------------------------------------------------------
@@ -353,10 +366,19 @@ public class ExhibitInteractable : UdonSharpBehaviour
             Mathf.Abs(Vector3.Dot(direction, transform.up)) * boundsExtentsLocal.y +
             Mathf.Abs(Vector3.Dot(direction, transform.forward)) * boundsExtentsLocal.z;
 
-        Vector3 iconPosition = center
+        // 자리 = standoff 를 적용하기 전, 작품 깊이 평면 위의 위치
+        Vector3 spot = center
             + direction * (halfExtent + _IconGap())
-            + Vector3.up * _IconHeightOffset()
-            + front * 0.02f;               // 벽/작품 표면에 파묻히지 않도록 살짝 앞으로
+            + Vector3.up * _IconHeightOffset();
+
+        // 걸어서 이동해 자리가 옮겨갔으면 그 자리의 빈 구간을 다시 잽니다.
+        // (제자리에서 고개만 돌릴 때는 자리가 움직이지 않으므로 재측정이 없습니다)
+        if (!_corridorValid || (spot - _corridorMeasuredAt).sqrMagnitude > RemeasureDistance * RemeasureDistance)
+        {
+            _MeasureCorridorAt(spot, front);
+        }
+
+        Vector3 iconPosition = spot + front * 0.02f;
 
         // World Space Canvas 는 자기 forward 의 <반대쪽>에 선 사람에게 글자가 정방향으로 읽힙니다.
         // 그래서 관람자를 "바라보게" 하지 않고, 관람자에게서 멀어지는 쪽을 forward 로 둡니다.
@@ -551,6 +573,37 @@ public class ExhibitInteractable : UdonSharpBehaviour
 
         _PushContent();
         overlay._Open(manager);
+    }
+
+    /// <summary>
+    /// <paramref name="spot"/> 에서 <paramref name="front"/> 축 앞뒤로 한 번씩 쏴서 빈 구간을 잽니다.
+    ///
+    /// 호출 시점이 중요합니다 — 아이콘이 <b>아직 비활성</b>일 때 불러야 아이콘 자신의 Collider 를
+    /// 맞히지 않습니다. Panel 은 자리가 다르므로(dir 방향으로 반폭만큼 더 나감) 따로 잽니다.
+    ///
+    /// 빈 구간은 정적 기하의 성질이므로 매 프레임 재지 않습니다. 그래서 흔들림(jitter)이 없고,
+    /// 캐스트는 관람자가 걸어서 이동할 때만 드물게 발생합니다.
+    /// </summary>
+    private void _MeasureCorridorAt(Vector3 spot, Vector3 front)
+    {
+        _corridorValid = true;
+        _corridorMeasuredAt = spot;
+        _corridorBack = _ProbeToward(spot, -front);
+        _corridorFront = _ProbeToward(spot, front);
+    }
+
+    /// <summary>맞힌 표면까지의 거리(m). 아무것도 없으면 -1 (= 제약 없음).</summary>
+    private float _ProbeToward(Vector3 origin, Vector3 direction)
+    {
+        int mask = Utilities.IsValid(manager) ? manager.iconProbeLayerMask : 2049;
+
+        RaycastHit hit;
+        if (!Physics.Raycast(origin, direction, out hit, ProbeDistance, mask, QueryTriggerInteraction.Ignore))
+        {
+            return -1f;
+        }
+
+        return hit.distance;
     }
 
     /// <summary>축 인덱스(0 = X, 1 = Y, 2 = Z)를 단위 벡터로. 부호는 붙이지 않습니다.</summary>
