@@ -1454,6 +1454,10 @@ public static partial class ExhibitDescriptorTools
                     Debug.LogWarning("[ExhibitDescriptor] ⓘ 아이콘이 활성 상태로 저장되어 있습니다. " +
                                      "비활성으로 저장하는 것을 권장합니다: " + GetPath(icon.transform), icon);
                 }
+
+                // 저작 시점에 "여기엔 Panel 이 들어갈 자리가 없다" 를 알려 줍니다.
+                // 런타임은 최대한 앞으로 클램프하지만, 그 상태를 조용히 두면 왜 잠기는지 알 수 없습니다.
+                WarnIfNoRoomForPanel(exhibit, path);
             }
 
             // 작품 정면을 덮는 Collider 는 감상을 방해합니다. (1.x 의 InteractionArea 잔재 포함)
@@ -1552,6 +1556,59 @@ public static partial class ExhibitDescriptorTools
 
         if (errors == 0) Debug.Log("[ExhibitDescriptor] Validate 통과. 작품 " + exhibits.Length + " 개.");
         else Debug.LogError("[ExhibitDescriptor] Validate 실패: 오류 " + errors + " 건.");
+    }
+
+    /// <summary>
+    /// 아이콘 자리의 앞뒤 여유가 Panel + 여백보다 좁으면 경고합니다.
+    /// 런타임과 같은 두 번의 Raycast 를 에디터에서 돌립니다.
+    ///
+    /// 작품이 콜라이더 안에 파묻힌 경우도 함께 봅니다 — 레이가 콜라이더 안에서 시작하면 그 콜라이더를
+    /// 보고하지 않으므로 앞뒤 측정이 둘 다 실패하고, 벽 보정이 동작하지 않습니다.
+    /// </summary>
+    private static void WarnIfNoRoomForPanel(ExhibitInteractable exhibit, string path)
+    {
+        SerializedObject so = new SerializedObject(exhibit);
+
+        SerializedProperty extentsProperty = so.FindProperty("boundsExtentsLocal");
+        if (extentsProperty == null || extentsProperty.vector3Value.sqrMagnitude <= 0f) return;
+
+        Vector3 centerLocal = so.FindProperty("boundsCenterLocal").vector3Value;
+        int thinAxis = so.FindProperty("thinAxis").intValue;
+
+        ExhibitManager manager = FindManagerForScene(exhibit);
+        int mask = manager != null ? manager.iconProbeLayerMask : DefaultIconProbeLayerMask;
+        float clearance = manager != null ? manager.iconClearance : 0.02f;
+
+        Transform t = exhibit.transform;
+        Vector3 center = t.TransformPoint(centerLocal);
+        Vector3 axis = t.rotation * (thinAxis == 0 ? Vector3.right : (thinAxis == 1 ? Vector3.up : Vector3.forward));
+
+        if (Physics.CheckSphere(center, 0.01f, mask))
+        {
+            Debug.LogWarning("[ExhibitDescriptor] 작품 중심이 콜라이더 안에 있어 벽 측정이 동작하지 않습니다. " +
+                             "작품을 벽에서 조금 빼내거나 그 콜라이더를 Icon Probe Layers 에서 제외하세요: " +
+                             path, exhibit);
+            return;
+        }
+
+        // 관람자가 설 수 있는 쪽을 정면으로 봅니다. (양쪽 다 막혀 있으면 + 쪽으로 가정)
+        RaycastHit sideHit;
+        bool positiveBlocked = Physics.Raycast(center, axis, out sideHit, 1f, mask, QueryTriggerInteraction.Ignore);
+        bool negativeBlocked = Physics.Raycast(center, -axis, out sideHit, 1f, mask, QueryTriggerInteraction.Ignore);
+        Vector3 front = positiveBlocked && !negativeBlocked ? -axis : axis;
+
+        RaycastHit hit;
+        float back = Physics.Raycast(center, -front, out hit, 1f, mask, QueryTriggerInteraction.Ignore) ? hit.distance : -1f;
+        float forward = Physics.Raycast(center, front, out hit, 1f, mask, QueryTriggerInteraction.Ignore) ? hit.distance : -1f;
+
+        if (back < 0f || forward < 0f) return;    // 한쪽이라도 열려 있으면 런타임이 해결합니다.
+
+        float needed = PanelWidth * CanvasScale * 0.5f + clearance * 2f;
+        if (back + forward >= needed) return;
+
+        Debug.LogWarning("[ExhibitDescriptor] 아이콘 자리의 앞뒤 여유가 " + (back + forward).ToString("0.00") +
+                         "m 뿐이라 Panel(" + needed.ToString("0.00") + "m 필요)이 벽에 잠깁니다. " +
+                         "Icon Placement 를 다른 쪽으로 바꾸세요: " + path, exhibit);
     }
 
     // 폰트 검사용 표본 문자
