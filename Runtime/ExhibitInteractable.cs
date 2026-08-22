@@ -157,6 +157,17 @@ public class ExhibitInteractable : UdonSharpBehaviour
     private float _corridorBack = -1f;
     private float _corridorFront = -1f;
 
+    // Panel 을 열 때 다시 쓰려고 마지막 _TickIcon 의 계산 결과를 보관합니다.
+    private Vector3 _iconSpot;
+    private Vector3 _iconFront;
+    private Vector3 _iconHeadPosition;
+    private float _iconDepthHalf;
+
+    // _ResolveStandoff 가 수렴할 때 함께 쓴 회전. 돌려준 standoff 와 짝이 맞는 값이므로,
+    // 이것을 그대로 적용해야 "벽면에서 clearance 확보" 보장이 정확히 성립합니다.
+    // (최종 위치에서 회전을 다시 구하면 deepest 가 미세하게 커져 1mm 단위로 어긋납니다)
+    private Quaternion _resolvedRotation;
+
     /// <summary>빈 구간을 찾을 때 쏘는 거리(m). 벽은 가깝고, 못 맞히면 제약이 없다는 뜻입니다.</summary>
     private const float ProbeDistance = 1f;
 
@@ -393,11 +404,16 @@ public class ExhibitInteractable : UdonSharpBehaviour
         // 그래서 관람자를 "바라보게" 하지 않고, 관람자에게서 멀어지는 쪽을 forward 로 둡니다.
         // (판정식: dot(관람자 - 아이콘, 아이콘 forward) < 0.
         //  각도만 보는 검증(Vector3.Angle ≈ 0)은 180도 뒤집힌 캔버스도 통과시킵니다)
-        Quaternion iconRotation = Quaternion.LookRotation(iconPosition - headPosition, Vector3.up);
+        Quaternion iconRotation = _resolvedRotation;
 
         _iconPosition = iconPosition;
         _iconRotation = iconRotation;
         _iconDirection = direction;
+
+        _iconSpot = spot;
+        _iconFront = front;
+        _iconHeadPosition = headPosition;
+        _iconDepthHalf = depthHalf;
 
         // ---- 시선 판정 (히스테리시스) ---------------------------------------
         // 아이콘을 조준하려고 고개를 돌리면 작품 중심이 시야에서 벗어나 아이콘이 사라지는
@@ -575,10 +591,43 @@ public class ExhibitInteractable : UdonSharpBehaviour
         bool vertical = placement == (int)ExhibitIconPlacement.Above ||
                         placement == (int)ExhibitIconPlacement.Below;
 
-        float halfSpan = vertical ? overlay._GetWorldHalfHeight() : overlay._GetWorldHalfWidth();
+        float halfWidth = overlay._GetWorldHalfWidth();
+        float halfHeight = overlay._GetWorldHalfHeight();
+        float halfSpan = vertical ? halfHeight : halfWidth;
 
-        overlayObject.transform.SetPositionAndRotation(
-            _iconPosition + _iconDirection * halfSpan, _iconRotation);
+        // Panel 자리는 아이콘보다 dir 방향으로 반폭만큼 더 나가 있어 벽 사정이 다를 수 있습니다.
+        // 그 자리에서 다시 재고(아이콘에서 떨어진 지점이라 아이콘 자신을 맞히지 않습니다),
+        // 아이콘도 같은 깊이로 옮겨 두 판이 한 평면에 서게 합니다.
+        Vector3 spot = _iconSpot + _iconDirection * halfSpan;
+        _MeasureCorridorAt(spot, _iconFront);
+
+        float standoff = _ResolveStandoff(spot, _iconFront, _iconHeadPosition,
+                                          halfWidth, halfHeight, _iconDepthHalf);
+
+        Vector3 panelPosition = spot + _iconFront * standoff;
+        Quaternion panelRotation = _resolvedRotation;
+
+        overlayObject.transform.SetPositionAndRotation(panelPosition, panelRotation);
+
+        // 아이콘을 Panel 평면으로 끌어올려 같은 깊이에 둡니다. (열려 있는 동안 둘 다 고정됩니다)
+        // 아이콘이 Panel 평면 **뒤로** 가지 않게만 보정합니다.
+        //
+        // 두 판은 각자 관람자를 향해 회전하므로 애초에 같은 평면이 될 수 없습니다. 억지로 Panel
+        // 평면에 정투영하면 기울어진 만큼 아이콘이 깊이로 밀려, 벽 쪽으로 10cm 넘게 들어가기도
+        // 합니다(실측). 필요한 것은 "겹쳐 보이지 않는 것" 뿐이므로, Panel 뒤에 있을 때만
+        // 관람자 쪽으로 당깁니다. 이 보정은 아이콘을 벽에서 **더 멀어지게만** 하므로 안전합니다.
+        Vector3 candidate = _iconSpot + _iconFront * standoff;
+        Vector3 panelNormal = panelRotation * Vector3.forward;   // 관람자에게서 멀어지는 쪽
+
+        float behind = Vector3.Dot(candidate - panelPosition, panelNormal);
+        if (behind > 0f) candidate = candidate - panelNormal * behind;
+
+        _iconPosition = candidate;
+        _iconRotation = Quaternion.LookRotation(candidate - _iconHeadPosition, Vector3.up);
+        if (Utilities.IsValid(infoIcon))
+        {
+            infoIcon.transform.SetPositionAndRotation(_iconPosition, _iconRotation);
+        }
 
         _PushContent();
         overlay._Open(manager);
@@ -625,6 +674,7 @@ public class ExhibitInteractable : UdonSharpBehaviour
         for (int pass = 0; pass < 2; pass++)
         {
             Quaternion rotation = Quaternion.LookRotation(spot + front * standoff - headPosition, Vector3.up);
+            _resolvedRotation = rotation;
 
             // 기울어진 판이 뒤로 파고드는 양
             float deepest = Mathf.Abs(Vector3.Dot(front, rotation * Vector3.right)) * halfWidth +
