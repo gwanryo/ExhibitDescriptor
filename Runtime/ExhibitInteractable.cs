@@ -335,15 +335,9 @@ public class ExhibitInteractable : UdonSharpBehaviour
     {
         if (!_HasInfoIcon()) return;
 
-        // Panel 이 열려 있는 동안에는 위치를 다시 계산하지 않습니다.
-        // Panel 은 열린 자리에 고정되는데(스펙) 아이콘만 따라 움직이면 둘이 어긋나,
-        // 걸어 다니는 동안 아이콘이 Panel 을 뚫거나 Panel 뒤로 숨습니다.
-        // 표시/페이드 상태만 계속 관리합니다.
-        if (_IsOverlayOpen())
-        {
-            _ApplyIconVisual(true, deltaTime);
-            return;
-        }
+        // Panel 이 열려 있는 동안에는 아이콘을 건드리지 않습니다.
+        // (여는 순간 _HideIcon 으로 꺼졌고, 읽는 중에 다시 켜지면 본문을 덮습니다)
+        if (_IsOverlayOpen()) return;
 
         Vector3 center = _GetIconCenter();
         Vector3 toHead = headPosition - center;
@@ -606,8 +600,7 @@ public class ExhibitInteractable : UdonSharpBehaviour
         float halfSpan = vertical ? halfHeight : halfWidth;
 
         // Panel 자리는 아이콘보다 dir 방향으로 반폭만큼 더 나가 있어 벽 사정이 다를 수 있습니다.
-        // 그 자리에서 다시 재고(아이콘에서 떨어진 지점이라 아이콘 자신을 맞히지 않습니다),
-        // 아이콘도 같은 깊이로 옮겨 두 판이 한 평면에 서게 합니다.
+        // 그 자리에서 다시 재고 배치합니다. (아이콘에서 떨어진 지점이라 아이콘 자신을 맞히지 않습니다)
         Vector3 spot = _iconSpot + _iconDirection * halfSpan;
         _MeasureCorridorAt(spot, _iconFront);
 
@@ -620,20 +613,13 @@ public class ExhibitInteractable : UdonSharpBehaviour
         overlayObject.transform.SetPositionAndRotation(panelPosition, panelRotation);
 
         // 아이콘을 Panel 평면으로 끌어올려 같은 깊이에 둡니다. (열려 있는 동안 둘 다 고정됩니다)
-        // 아이콘이 Panel 평면 **뒤로** 가지 않게만 보정합니다.
+        // Panel 이 열려 있는 동안에는 아이콘을 숨깁니다.
         //
-        // 두 판은 각자 관람자를 향해 회전하므로 애초에 같은 평면이 될 수 없습니다. 억지로 Panel
-        // 평면에 정투영하면 기울어진 만큼 아이콘이 깊이로 밀려, 벽 쪽으로 10cm 넘게 들어가기도
-        // 합니다(실측). 필요한 것은 "겹쳐 보이지 않는 것" 뿐이므로, Panel 뒤에 있을 때만
-        // 관람자 쪽으로 당깁니다. 이 보정은 아이콘을 벽에서 **더 멀어지게만** 하므로 안전합니다.
-        Vector3 candidate = _iconSpot + _iconFront * standoff;
-        Vector3 panelNormal = panelRotation * Vector3.forward;   // 관람자에게서 멀어지는 쪽
-
-        float behind = Vector3.Dot(candidate - panelPosition, panelNormal);
-        if (behind > 0f) candidate = candidate - panelNormal * behind;
-
-        _iconPosition = candidate;
-        _iconRotation = Quaternion.LookRotation(candidate - _iconHeadPosition, Vector3.up);
+        // Panel 의 안쪽 가장자리가 아이콘 자리에서 시작하므로, 아이콘을 남겨 두면 아이콘과 그 위에
+        // 뜨는 "설명" 툴팁이 본문 첫 줄을 덮습니다(실기에서 확인). 아이콘을 끄면 툴팁도 함께
+        // 사라지고(비활성 오브젝트는 Interact 대상이 아니므로), 두 판의 깊이·평면을 맞출 필요도
+        // 없어집니다. 닫기는 Panel 의 × 버튼이 담당합니다.
+        _HideIcon();
         if (Utilities.IsValid(infoIcon))
         {
             infoIcon.transform.SetPositionAndRotation(_iconPosition, _iconRotation);
@@ -800,12 +786,7 @@ public class ExhibitInteractable : UdonSharpBehaviour
         }
 
         infoIcon._SetAlpha(_iconAlpha);
-
-        // 열려 있는 동안에는 _OpenOverlayAtIcon 이 정해 둔 자리를 유지합니다.
-        if (!_IsOverlayOpen())
-        {
-            infoIcon.transform.SetPositionAndRotation(_iconPosition, _iconRotation);
-        }
+        infoIcon.transform.SetPositionAndRotation(_iconPosition, _iconRotation);
     }
 
     private float _StepAlpha(float current, float target, float deltaTime)
