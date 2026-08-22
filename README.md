@@ -1,7 +1,36 @@
 # Exhibit Descriptor for VRChat (UdonSharp)
 
-작품을 클릭하면 **작품 옆에** 설명 Overlay 가 뜨는 전시 시스템입니다.
+작품을 **응시하면 옆에 ⓘ 아이콘**이 뜨고, 그 아이콘을 클릭하면 설명 Overlay 가 아이콘 자리에서
+펼쳐지는 전시 시스템입니다.
 Local Only · 다중 Overlay 동시 표시 · KR/EN/JP 다국어 · 100개 이상 확장 대응.
+
+## 2.0 에서 달라진 점 (파괴적 변경)
+
+1.x 는 작품 **정면을 덮는 판정 박스**(`InteractionArea`)로 Interact 를 받았습니다. 감상하려고
+작품을 보면 화면 중앙에 툴팁과 하이라이트가 얹혔고, 설명 위치(`OverlayAnchor`)는 생성 시점의
+Bounds 로 한 번 구워져 작품을 옮기거나 교체하면 어긋났습니다. 정면의 **부호**(앞/뒤)는 Bounds 만으로
+알 수 없어 사람이 Anchor 를 180도 돌려 고쳐야 했습니다.
+
+2.0 은 그 세 문제를 한 가지 결정으로 함께 풉니다 — **배치의 부호를 에디터에서 추측하지 않고,
+런타임에 플레이어 머리 위치로 정합니다.**
+
+```
+side = sign( dot(head - artworkCenter, thinAxisWorld) )
+```
+
+- 작품 정면에는 판정 영역이 **없습니다.** 응시할 때만 아이콘이 켜지고, 꺼져 있는 동안에는
+  Collider 도 함께 죽으므로 Interact 대상이 아예 존재하지 않습니다.
+- 에디터가 굽는 값은 배치 결과가 아니라 **기하 세 개**(중심 / extents / 가장 얇은 축)뿐입니다.
+  사람이 고칠 값이 아니라 저장할 때마다 덮어쓰므로, Mesh 를 교체·이동·스케일해도 자동으로 따라갑니다.
+- 글자 방향도 런타임이 맞춥니다. 작품 앞뒤 어느 쪽에서 봐도 정방향으로 읽힙니다.
+
+**제거된 것:** `ExhibitInteractRelay` 컴포넌트, `InteractionArea` / `OverlayAnchor` 오브젝트,
+`snapToAnchorOnOpen` / `overlayAnchor` / `interactRelays` 필드, 작품 Root 의 `Interact()`.
+
+**1.x 로 만든 씬 마이그레이션:** `Tools > Exhibit Descriptor > Migrate Exhibits From 1.x` 를 한 번
+실행하면 `InteractionArea` / `OverlayAnchor` 를 제거하고 아이콘을 만들어 연결합니다. (Ctrl+Z 로 되돌릴 수 있습니다)
+`Setup` 은 아이콘이 없는 작품에 아이콘을 만들어 주기만 하고, **오브젝트를 지우지는 않습니다** —
+저장 훅(`Auto Setup On Save`) 도중에 오브젝트를 파괴하지 않기 위해 제거는 명시적 메뉴로 분리했습니다.
 
 ---
 
@@ -31,7 +60,7 @@ Packages/com.gwanryo.exhibit-descriptor/
 │  ├─ ExhibitEnums.cs              // ExhibitLanguage, ExhibitButtonAction
 │  ├─ ExhibitManager.cs            // Scene 당 1개. 언어 상태 + 단일 Update 틱
 │  ├─ ExhibitInteractable.cs       // 작품 1개. 데이터 보유 + Overlay 토글
-│  ├─ ExhibitInteractRelay.cs      // Collider 와 같은 GameObject 에서 Interact 판정
+│  ├─ ExhibitInfoIcon.cs           // 응시할 때 켜지는 ⓘ 아이콘 (Interact 를 받는 유일한 지점)
 │  ├─ ExhibitOverlay.cs            // 작품별 Overlay. Fade+Scale, 스크롤
 │  ├─ ExhibitOverlayButton.cs      // Close / ScrollUp / ScrollDown 버튼
 │  ├─ ExhibitLanguageSwitch.cs     // 월드용 언어 전환 버튼 (선택)
@@ -152,8 +181,8 @@ ExhibitionRoot
 │
 └─ Exhibit_New                      ← ExhibitInteractable (작품 데이터 보유)
    ├─ Artwork                       ← 실제 작품 Mesh (Collider 없음. 템플릿은 투명 Placeholder)
-   ├─ InteractionArea               ← BoxCollider + ExhibitInteractRelay (Interact 판정)
-   ├─ OverlayAnchor                 ← Overlay 표시 위치/방향 (빈 Transform)
+   ├─ InfoIcon                      ← World Space Canvas + CanvasGroup + Image(원) + "i"
+   │                                  + BoxCollider + ExhibitInfoIcon (기본 SetActive(false))
    └─ Overlay                       ← Canvas(World Space) + CanvasGroup + ExhibitOverlay
       └─ Panel                      ← 배경 Image, Scale 애니메이션 대상
          ├─ TitleText               ← TextMeshProUGUI
@@ -171,16 +200,18 @@ ExhibitionRoot
 
 - **`Panel` 을 한 겹 추가**했습니다. Canvas 자체는 `localScale = 0.001` 이라
   Scale 애니메이션 대상으로 쓰면 계산이 지저분해집니다. Panel(scale=1)을 흔드는 편이 안전합니다.
-- **데이터는 작품 Root, Interact 판정은 `InteractionArea`** 로 나눴습니다.
-  VRChat 의 Interact 는 **Collider 와 UdonBehaviour 가 같은 GameObject** 일 때가 가장 안전합니다.
-  그래서 `InteractionArea` 에 `BoxCollider` + `ExhibitInteractRelay` 를 함께 두고,
-  릴레이가 작품 Root 의 `ExhibitInteractable._ToggleOverlay()` 를 호출합니다.
-  → 작품 데이터는 Root 한 곳에 모이고, 클릭 판정은 Mesh 와 완전히 분리됩니다 (요구사항 12).
-- 한 작품에 **Interact 영역을 여러 개** 둘 수도 있습니다 (정면/측면 등).
-  `InteractionArea` 를 복제하기만 하면 되고, Setup 도구가 전부 수집해 연결합니다.
+- **데이터는 작품 Root, Interact 판정은 `InfoIcon`** 으로 나눴습니다.
+  VRChat 의 Interact 는 **Collider 와 UdonBehaviour 가 같은 GameObject** 일 때가 가장 안전하므로
+  아이콘에 `BoxCollider` + `ExhibitInfoIcon` 을 함께 둡니다.
+  → 작품 데이터는 Root 한 곳에 모이고, 클릭 판정은 Mesh 와 완전히 분리됩니다.
+- 아이콘은 **응시할 때만 켜집니다.** 꺼져 있으면 Collider 도 죽으므로 감상 중에는 Interact 대상이
+  물리적으로 존재하지 않습니다. "툴팁이 안 뜨는" 게 아니라 뜰 수가 없습니다.
+- 아이콘의 위치 / 회전 / 페이드는 `ExhibitInteractable._TickIcon()` 이 계산하고,
+  `ExhibitManager` 의 단일 `Update()` 가 응시 후보에만 매 프레임 호출합니다.
 
-> Collider 를 작품 Root 에 직접 붙이는 방식도 그대로 동작합니다.
-> `ExhibitInteractable` 자체가 `Interact()` 를 구현하고 있어 릴레이 없이도 됩니다.
+> 아이콘 그림은 Unity 내장 원형 스프라이트(Knob) + ASCII `"i"` 로 그립니다.
+> `ⓘ`(U+24D8) 글자를 쓰지 않는 이유는 CJK 폰트에도 fallback 에도 없어 □ 로 보이기 때문입니다.
+> (닫기 버튼의 `✕` 가 같은 이유로 `×` 로 교체된 이력이 있습니다)
 
 ---
 
@@ -226,7 +257,7 @@ ExhibitionRoot
 | ExhibitManager | `ExhibitManager` (U#) | Scene 당 1개 |
 | ExhibitManager | `ExhibitDescriptorSettings` (일반 MonoBehaviour) | Editor 전용 설정(Overlay Font). U# 이 아님 |
 | Exhibit Root | `ExhibitInteractable` (U#) | 작품 데이터 보유 |
-| InteractionArea | `BoxCollider` + `ExhibitInteractRelay` (U#) | `isTrigger = true`, Layer = Default |
+| InfoIcon | `Canvas`(World Space) + `CanvasGroup` + `Image` + `TextMeshProUGUI` + `BoxCollider` + `ExhibitInfoIcon` (U#) | `isTrigger = true`, Layer = Default, 기본 비활성 |
 | Overlay | `Canvas` / `CanvasGroup` / `ExhibitOverlay` (U#) | World Space |
 | Panel | `Image` | Scale 애니메이션 대상 |
 | Title/Subtitle/Description | `TextMeshProUGUI` | CJK Font Asset (`ExhibitManager > Exhibit Descriptor Settings > Overlay Font` 에서 자동 적용) |
@@ -245,6 +276,18 @@ ExhibitionRoot
 | Default Interaction Text KR / EN / JP | `설명` / `Description` / `説明` |
 | Default Proximity | `2` |
 | Debug Log | `false` |
+| **Default Icon Placement** | `Right` — 작품이 `Default` 일 때 쓰는 방향. 전시 전체 배치를 이 값 하나로 바꿉니다 |
+| **Default Icon Gap** | `0.15` m — 작품 가장자리와 아이콘 사이 여백 |
+| **Default Icon Height Offset** | `0` m — 아이콘 높이 보정(월드 Y, 음수 가능) |
+| **Default Icon Size** | `0.08` m — 아이콘 한 변. Setup 이 Scale/Collider 에 굽습니다 |
+| **Default Gaze Distance** | `6` m — 이 거리 밖에서는 아이콘이 뜨지 않음 |
+| **Gaze Enter Angle** | `25`° — 아이콘이 **나타나는** 시선 각 |
+| **Gaze Exit Angle** | `45`° — 아이콘이 **유지되는** 시선 각 (조준하려 고개를 돌려도 사라지지 않게) |
+| **Icon Fade Duration** | `0.12` 초 |
+| **Icon Scan Per Frame** | `8` — 프레임당 근접 스캔 개수 (작품 100개면 한 바퀴 ≈ 13프레임) |
+
+> 방향 / 여백 / 높이 / 거리는 **런타임에 해석**하므로 Manager 값을 바꾸면 Setup 을 다시 돌리지 않아도
+> 즉시 반영됩니다. `Default Icon Size` 만 아이콘의 실제 크기를 바꾸므로 Setup 이 굽습니다.
 
 **ExhibitDescriptorSettings** (같은 `ExhibitManager` 오브젝트에 붙는 Editor 전용 컴포넌트)
 
@@ -261,9 +304,11 @@ ExhibitionRoot
 |---|---|
 | Manager | 자동 연결 (비우면 런타임에 이름으로 탐색) |
 | Overlay | 자기 Prefab 안의 Overlay |
-| Overlay Anchor | `OverlayAnchor` |
+| Info Icon | 자식 `InfoIcon` (Setup 이 자동 생성·연결) |
 | Manager Object Name | `ExhibitManager` |
-| Interact Relays | 자식 `InteractionArea` 들 (자동 수집) |
+| Icon Placement | `Default`(Manager 값) / `Right` / `Left` / `Above` / `Below` |
+| Override Icon Settings | `false` — 켜면 아래 네 값을 이 작품만 따로 사용 |
+| Icon Gap / Icon Height Offset / Icon Size / Gaze Distance | `0.15` / `0` / `0.08` / `6` (Override 를 켤 때만 사용) |
 | Title KR / EN / JP | 작품 제목 |
 | Subtitle KR / EN / JP | 작가·연도 등 (선택) |
 | Description KR / EN / JP | 본문 |
@@ -367,7 +412,7 @@ Exhibit_New 선택 → Tools > Exhibit Descriptor > Setup Selected Exhibits
 3. Play 버튼
 4. 작품 앞으로 이동 → 화면 중앙에 **`설명`** 툴팁 확인 → 좌클릭
 5. 체크리스트
-   - [ ] Overlay 가 작품 옆(`OverlayAnchor` 위치)에서 Fade+Scale 로 나타남
+   - [ ] 작품을 응시하면 옆에 ⓘ 아이콘이 페이드인, 아이콘을 Interact 하면 그 자리에서 Overlay 가 Fade+Scale 로 펼쳐짐
    - [ ] 플레이어가 움직여도 Overlay 가 회전하지 않음 (고정 방향)
    - [ ] 같은 작품을 다시 클릭 → 역방향 애니메이션으로 닫힘
    - [ ] `✕` 버튼 클릭 → 닫힘
@@ -779,8 +824,7 @@ UdonBehaviour 의 `proximity` 직렬화 필드에 직접 기록합니다. (SDK �
    Mesh 는 남아 있으므로 Hierarchy 에서 `Artwork` 를 선택하면 Scene View 에 Bounds 가 보여
    위치·크기는 그대로 조절할 수 있습니다. 눈에 보이지 않아 교체를 잊기 쉬우므로
    `Validate Scene` 이 아직 Placeholder 인 작품을 **경고**로 알려 줍니다.
-4. `InteractionArea` 의 BoxCollider 크기를 작품에 맞춤
-5. `OverlayAnchor` 를 작품 옆 원하는 위치/각도로 배치
+4. (아이콘 위치·크기는 Setup 과 런타임이 정하므로 손댈 것이 없습니다. 방향만 필요하면 `Icon Placement`)
 6. 모든 TMP 의 Font Asset 을 CJK Font Asset 으로 교체
 7. `Tools > Exhibit Descriptor > Setup Selected Exhibits`
 8. `Overlay` 를 **비활성**으로 두고 Prefab 으로 저장
@@ -792,7 +836,7 @@ UdonBehaviour 의 `proximity` 직렬화 필드에 직접 기록합니다. (SDK �
 3. 위치/회전 배치
 4. `Artwork` 의 Mesh/Material 교체 (투명 Placeholder 라 화면에는 아무것도 보이지 않습니다)
 5. Inspector 에서 `Title KR/EN/JP`, `Description KR/EN/JP` 입력
-6. (필요 시) `Interaction Proximity`, `OverlayAnchor` 위치 조정
+6. (필요 시) `Interaction Proximity`, `Icon Placement` / `Override Icon Settings` 조정
 7. 끝. **Manager 에 등록하는 작업은 없습니다.**
 
 전부 배치한 뒤 마지막에 한 번:
@@ -842,7 +886,8 @@ ExhibitionRoot
 | Setup Selected Exhibits | 선택 작품/언어 전환 버튼의 참조 자동 연결 + Interact 값 베이크 |
 | Setup All Exhibits In Scene | 열려 있는 모든 Scene 일괄 처리 (연결은 **각자의 Scene** 안에서만) |
 | **Auto Setup On Save** | Scene 저장 시 그 Scene 에 Setup 자동 실행 (토글, 기본 ON) |
-| Validate Scene | 누락 참조 / Collider 없음 / Canvas 모드 오류 / **폰트에 한글·일본어 글리프 없음** 을 콘솔에 보고 |
+| **Migrate Exhibits From 1.x** | 1.x 의 `InteractionArea` / `OverlayAnchor` 를 제거하고 ⓘ 아이콘 구성으로 맞춤 (Undo 가능) |
+| Validate Scene | 아이콘 Collider/Canvas/target/기하 · 누락 참조 · Canvas 모드 오류 · **폰트에 한글·일본어 글리프 없음** 을 콘솔에 보고 |
 
 **Create Exhibits From Selected Meshes**
 
@@ -853,9 +898,9 @@ Mesh 하나당 Exhibit 하나가 생기고, Mesh 는 **World 위치를 유지한
 | 항목 | 자동 계산 |
 |---|---|
 | 이름 | `Exhibit_###` — Scene 에 있는 마지막 번호 다음부터 (기존 작품을 덮지 않음) |
-| `InteractionArea` BoxCollider | 작품 Bounds + 사방 `0.15m` (정면 법선축은 최소 `0.3m`) |
-| `OverlayAnchor` 위치 | 작품 옆 끝 + `0.15m` + Panel 절반폭(`0.3m`), 높이는 작품 중심 |
-| `OverlayAnchor` 방향 | Panel 의 **글자가 읽히는 면**이 작품 정면 쪽(관람자 쪽)을 향하도록 회전 |
+| 기하 정보 | `boundsCenterLocal` / `boundsExtentsLocal` / `thinAxis` (작품 로컬 좌표, 매 Setup 마다 덮어씀) |
+| 아이콘 크기 | `iconSize`(기본 `0.08m`) → 아이콘 `localScale`, BoxCollider 는 `max(iconSize * 1.75, 0.14m)` |
+| 아이콘 위치·방향 | **굽지 않습니다.** 런타임이 매 프레임 플레이어 머리 위치로 계산합니다 |
 | `Title KR` | 원본 오브젝트 이름. EN/JP 는 **비움** → KR 로 fallback |
 | 참조 연결 / Interact 베이크 | `SetupExhibitFull` 까지 자동 실행 |
 
@@ -866,10 +911,10 @@ Mesh 하나당 Exhibit 하나가 생기고, Mesh 는 **World 위치를 유지한
   Panel 이 그림 앞을 가리지 않고, 관람자에게 옆면(선)으로 보이지도 않습니다.
   (Overlay 에는 빌보드가 없으므로 이 방향이 그대로 런타임 결과입니다)
 - 정면의 **부호**까지는 Bounds 로 알 수 없어 **얇은 축의 + 방향**을 정면으로 봅니다.
-  작품이 반대로 놓여 Panel 이 벽을 보면 `OverlayAnchor` 를 180도 돌리세요.
+  부호(앞/뒤)는 런타임이 플레이어 위치로 정하므로, 작품이 반대로 놓여 있어도 수동 보정이 필요 없습니다.
   Setup 은 Anchor 를 다시 계산하지 않으므로 그 수정이 유지됩니다.
 - **Canvas 부호 규약:** World Space Canvas 는 자기 `forward`(+Z) 의 **반대쪽**에 선 사람에게
-  글자가 정방향으로 보입니다. 그래서 `OverlayAnchor` 는 관람자 쪽이 아니라 **관람자 반대쪽**을 봅니다.
+  글자가 정방향으로 보입니다. 그래서 아이콘과 Panel 의 forward 는 관람자 쪽이 아니라 **관람자 반대쪽**을 봅니다.
   점검할 때는 각도가 아니라 `dot(관람자 위치 - Panel 위치, Overlay.forward) < 0` 으로 확인하세요.
   (각도만 보면 180도 뒤집힌 Panel 도 "정면을 본다" 로 통과합니다 — 글자가 좌우 반전됩니다)
   얇은 축이 Z 인 작품의 Anchor 도 `identity` 가 아니라 **Y 180도**가 정상입니다.
@@ -881,7 +926,7 @@ Mesh 하나당 Exhibit 하나가 생기고, Mesh 는 **World 위치를 유지한
 - 건너뛰는 대상: Scene 밖 오브젝트, Renderer 없음, 이미 Exhibit 안, 선택된 다른 오브젝트의 자식.
   전부 이유를 콘솔에 남깁니다.
 - 작품 Mesh 에 Collider 가 남아 있으면 **경고**합니다. Interact 레이가 거기서 막히면
-  `InteractionArea` 가 반응하지 않습니다. (지우지는 않습니다 — 물리 충돌용일 수 있으므로)
+  ⓘ 아이콘을 클릭할 수 없습니다. (지우지는 않습니다 — 물리 충돌용일 수 있으므로 Validate 가 경고만 합니다)
 
 **Auto Setup On Save**
 
@@ -961,7 +1006,7 @@ Mesh 하나당 Exhibit 하나가 생기고, Mesh 는 **World 위치를 유지한
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| 작품을 봐도 Interact 표시가 안 뜬다 | **Collider 와 UdonBehaviour 가 다른 GameObject** | `InteractionArea` 에 `ExhibitInteractRelay` 를 붙이거나 Collider 를 작품 Root 로 이동 (Validate 가 잡아냅니다) |
+| 작품을 봐도 아무것도 안 뜬다 | 정상입니다. 작품 정면에는 판정이 없습니다 | 옆의 ⓘ 아이콘을 보세요. 아이콘이 아예 안 뜨면 Setup 을 실행해 기하가 구워졌는지 확인 (Validate 가 잡아냅니다) |
 | 〃 | 거리/Layer 문제 | `Proximity` 확인, Layer 를 Default 로 |
 | `VRC Ui Shape` 컴포넌트를 못 찾겠다 | **SDK2 전용 컴포넌트** | SDK3(Udon) 월드에는 존재하지 않습니다. 추가하지 마세요 |
 | 버튼이 안 눌린다 | 버튼 Layer 가 `UI` | 버튼 GameObject Layer 를 **Default** 로 변경 (Validate 가 경고함) |
@@ -981,9 +1026,9 @@ Mesh 하나당 Exhibit 하나가 생기고, Mesh 는 **World 위치를 유지한
 | 언어 전환 버튼마다 표시 언어가 다름 | (구버전) 라벨이 각자 갱신됨 | 현재 구현은 Manager 가 모든 버튼에 브로드캐스트합니다. `Setup` 을 실행해 `manager` 를 연결하세요 |
 | `Multiple EventSystems in scene` 경고 | 씬에 EventSystem 이 있음 | 삭제 (VRChat 이 자체 제공) |
 | Prefab 복제 후 Manager 참조가 비어 있음 | Scene 참조는 Prefab 에 저장 안 됨 | 정상. `Setup All Exhibits In Scene` 실행 or 런타임 자동 Find |
-| Overlay 가 벽에 파묻힌다 | Anchor 가 벽 안쪽 | `OverlayAnchor` 를 벽에서 3~5cm 앞으로 |
-| Panel 이 벽(작품 뒤쪽)을 본다 | 작품의 얇은 축 **-** 방향이 정면 | `OverlayAnchor` 를 180도 회전 (Setup 이 덮어쓰지 않습니다) |
-| 글자가 **좌우 반전**돼 보인다 | 관람자가 Canvas 뒷면을 보고 있음 (`dot(관람자 - Panel, Overlay.forward) > 0`) | `OverlayAnchor` 를 180도 회전. 이 버전 이전에 만든 Exhibit 은 모두 이 상태이므로 Anchor 를 돌리거나 다시 생성하세요 |
+| 아이콘이 벽에 파묻힌다 | 작품이 벽에 아주 가깝게 붙어 있음 | 작품의 `Icon Placement` 를 반대쪽이나 `Above` 로 바꾸세요 (자동 회피는 넣지 않았습니다) |
+| Panel 이 벽을 본다 | 2.0 에서는 발생하지 않습니다 (런타임이 관람자 쪽으로 정합니다) | 그래도 보이면 Setup 을 실행해 기하를 다시 굽고, Validate 로 확인하세요 |
+| 글자가 **좌우 반전**돼 보인다 | 2.0 에서는 발생하지 않습니다 | 만약 보이면 버그입니다. `dot(관람자 - Panel, Panel.forward) < 0` 이어야 정방향입니다 |
 | 빌드 시 `Udon Behaviour serialization` 에러 | U# 프록시와 UdonBehaviour 불일치 | `VRChat SDK > Utilities > Reserialize All Udon Assets` 실행 |
 | Overlay 가 다른 오브젝트 뒤에 그려진다 | World Space Canvas 정렬 | Canvas 의 `Sorting Layer`/`Order in Layer` 조정 또는 Anchor 를 앞으로 |
 
@@ -998,7 +1043,7 @@ Mesh 하나당 Exhibit 하나가 생기고, Mesh 는 **World 위치를 유지한
 
 | # | 배운 점 | 반영 내용 |
 |---|---|---|
-| 1 | **Interact 는 Collider 와 UdonBehaviour 가 같은 GameObject 여야 안전** | `ExhibitInteractRelay` 신규 추가. `InteractionArea` 에 Collider + 릴레이를 함께 두고 작품 Root 의 데이터와 분리. Validate 에서 "Collider 가 자식에만 있고 UdonBehaviour 가 없음" 을 **에러로 검출** |
+| 1 | **Interact 는 Collider 와 UdonBehaviour 가 같은 GameObject 여야 안전** | ⓘ 아이콘에 Collider + `ExhibitInfoIcon` 을 함께 두고 작품 Root 의 데이터와 분리. Validate 가 아이콘의 Collider / Canvas / target / 기하를 검사 |
 | 2 | `Start()` 에서 Overlay 를 강제로 닫기 | 편집 중 Overlay 를 켜 둔 채 저장해도 월드 입장 시 반드시 닫힘. 기존에는 "비활성으로 저장하세요" 경고에만 의존했음 |
 | 3 | 언어 전환 시 스크롤을 맨 위로 | 언어마다 본문 길이가 달라 스크롤 위치가 어긋나던 문제 해결 (`_ScrollToTop()`) |
 | 4 | fallback 을 KR → EN → **JP** 까지 | 기존엔 KR → EN 까지만. JP 만 채운 작품도 정상 표시 |
@@ -1071,7 +1116,7 @@ VRChat 규약상 **`_` 로 시작하지 않는 public 메서드는 `SendCustomNe
 반영 후 `Tools > Exhibit Descriptor > Validate Scene` 이 추가로 검출하는 항목:
 
 - Collider 가 자식에만 있고 그 GameObject 에 UdonBehaviour 가 없음 (**에러**)
-- `ExhibitInteractRelay.target` 미연결 (**에러**)
+- `ExhibitInfoIcon.target` 미연결, 아이콘 Collider / World Space Canvas 누락, 기하가 0 (**에러**)
 - `ExhibitManager` 오브젝트가 비활성 (**에러**)
 - 작품/언어 전환 버튼의 `manager` 가 **다른 Scene** 을 가리킴 (**에러**)
 - 작품은 있는데 그 Scene 에 `ExhibitManager` 가 없음 (**에러**)
@@ -1091,7 +1136,7 @@ VRChat 규약상 **`_` 로 시작하지 않는 public 메서드는 `SendCustomNe
 |---|---|---|
 | 1 | UdonSharp | ✅ 전 스크립트 U# |
 | 2 | 작품이 데이터 직접 보유 | ✅ `ExhibitInteractable` Inspector |
-| 3 | Overlay 위치 Inspector 지정 | ✅ `OverlayAnchor` Transform |
+| 3 | Overlay 위치 | ✅ 런타임이 아이콘 옆에 배치 (`Icon Placement` 로 방향만 선택) |
 | 4 | 고정 방향 | ✅ Anchor rotation 사용, 회전 로직 없음 |
 | 5 | TextMeshProUGUI | ✅ |
 | 6 | 표시 정보 Inspector 설정 | ✅ Show Title/Subtitle/Description/ExtraInfo |
@@ -1100,7 +1145,7 @@ VRChat 규약상 **`_` 로 시작하지 않는 public 메서드는 `SendCustomNe
 | 9 | 다중 Overlay 동시 표시 | ✅ 작품별 독립 |
 | 10 | Fade + Scale 애니메이션 | ✅ SmoothStep, 0.18/0.12s |
 | 11 | 거리 작품별 설정 (기본 2m) | ✅ |
-| 12 | BoxCollider, Mesh 분리 | ✅ `InteractionArea` + `ExhibitInteractRelay` (영역 다중 배치 가능) |
+| 12 | BoxCollider, Mesh 분리 | ✅ `InfoIcon` (응시할 때만 활성) |
 | 13 | Interact 문구 (기본 "설명") | ✅ 3개 국어 지원 |
 | 14 | Local Only | ✅ SyncMode.None, 동기화 0 |
 | 15 | 작품당 Overlay 1개 | ✅ |

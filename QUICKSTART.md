@@ -63,17 +63,19 @@ EN / JP 는 **비워 둬도 됩니다.** 비어 있으면 자동으로 KR 로 �
 - `Artwork` 아래에 작품 fbx/prefab 을 자식으로 드래그 (placeholder 는 삭제해도 됨)
 
 > **Collider 는 절대 붙이지 마세요.**
-> 클릭 판정은 옆의 `InteractionArea` 가 전담합니다.
+> 클릭 판정은 작품을 응시할 때만 켜지는 `InfoIcon` 이 전담합니다.
+> 작품 정면에는 판정 영역이 없어 감상 중에는 툴팁도 하이라이트도 뜨지 않습니다.
 > 작품 Mesh 에 Collider 가 있으면 Interact 가 그쪽으로 새서 오히려 안 눌립니다.
 
 작품 크기를 크게 바꿨다면 두 개만 맞춰 주세요.
 
-- `InteractionArea` 의 BoxCollider 크기 → 작품을 덮도록
-- `OverlayAnchor` 위치/회전 → 설명이 뜰 자리와 Panel 이 보는 방향 (기본: 오른쪽 0.9m, 높이 1.5m, Y 180도)
+- 아이콘 위치는 **손댈 필요가 없습니다.** 런타임이 작품 기하와 플레이어 위치로 정합니다.
+- 바꾸고 싶으면 작품의 `Icon Placement`(Right / Left / Above / Below) 하나만 고르세요.
+  전시 전체를 바꾸려면 `ExhibitManager` 의 `Default Icon Placement` 를 고칩니다.
 
 > **회전은 뒤집혀 보이는 쪽이 정상입니다.** World Space Canvas 는 자기 `forward`(+Z) 의 **반대쪽**에서
 > 글자가 정방향으로 읽힙니다. 그래서 Anchor 의 forward 는 관람자 반대쪽을 봅니다.
-> 글자가 좌우 반전돼 보이면 `OverlayAnchor` 를 180도 돌리세요.
+> 글자 방향도 런타임이 맞춥니다. 작품 앞뒤 어디에서 봐도 정방향으로 읽힙니다.
 
 > **한글이 □ 로 보이면** 폰트 문제입니다. TMP 기본 폰트에는 한글 글리프가 없습니다.
 > CJK Font Asset 을 만들어 `ExhibitManager` 의 **`Exhibit Descriptor Settings > Overlay Font`** 에 넣고
@@ -109,9 +111,9 @@ Tools > Exhibit Descriptor > Create Exhibits From Selected Meshes
 | 항목 | 계산 방식 |
 |---|---|
 | 이름 | `Exhibit_001`, `Exhibit_002` … (Scene 에 있는 마지막 번호 다음부터) |
-| `InteractionArea` 크기 | 작품 Bounds + 사방 0.15m (정면 법선축은 최소 0.3m) |
-| `OverlayAnchor` 위치 | 작품 옆 끝 + 0.15m 여백, 높이는 작품 중심 (바닥에 묻히지 않게 보정) |
-| `OverlayAnchor` 방향 | Panel 의 **글자가 읽히는 면**이 관람자(작품 정면) 쪽을 향하도록 회전 |
+| 굽는 기하 | 작품 Bounds 의 중심 / extents / 가장 얇은 축 (전부 작품 로컬 좌표) |
+| 아이콘 크기 | `iconSize`(기본 0.08m) 를 아이콘 Scale 과 BoxCollider 에 반영. Collider 는 조준 편의를 위해 1.75배(최소 0.14m) |
+| 아이콘 위치·방향 | **굽지 않습니다.** 런타임이 매 프레임 플레이어 머리 위치로 계산합니다 |
 | `Title KR` | 원본 오브젝트 이름 (EN/JP 는 비워 두어 KR 로 fallback) |
 | 참조 연결 / Interact 값 | Setup 까지 자동 실행 |
 
