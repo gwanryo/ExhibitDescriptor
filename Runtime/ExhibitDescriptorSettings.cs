@@ -41,4 +41,14 @@ public class ExhibitDescriptorSettings : MonoBehaviour
              "한글/일본어를 표시하려면 CJK 글리프를 포함한 TMP Font Asset 을 지정하세요. " +
              "지정 후 Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 실행하면 반영됩니다.")]
     public TMP_FontAsset overlayFont;
+
+    [Header("Info Icon")]
+    [Tooltip("아이콘과 Panel 이 '벽' 으로 취급할 Layer 입니다. 이 Layer 의 콜라이더를 재서 " +
+             "아이콘/Panel 이 벽에 잠기지 않을 깊이를 정합니다. " +
+             "비워 두면 Default + Environment 를 씁니다. (Setup 이 ExhibitManager 에 int 로 구워 넣습니다)")]
+    public LayerMask iconProbeLayers = new LayerMask();
+
+    // LayerMask 도 overlayFont 와 같은 이유로 여기 있습니다 — UdonSharpBehaviour 의 직렬화 필드
+    // 타입은 Udon 타입 화이트리스트(NodeRegistry)를 타므로, 검증되지 않은 타입을 올리면
+    // 프로젝트 전체 U# 컴파일이 막힙니다. Manager 가 받는 값은 int 입니다.
 }

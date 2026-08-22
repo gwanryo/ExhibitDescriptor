@@ -43,6 +43,9 @@ public static partial class ExhibitDescriptorTools
     /// <summary>아이콘 Collider 의 최소 한 변(m). 8cm 아이콘을 마우스로 정확히 조준하기는 어렵습니다.</summary>
     private const float IconColliderMinimum = 0.14f;
 
+    /// <summary>Default(0) + Environment(11). ExhibitManager.iconProbeLayerMask 의 기본값과 같아야 합니다.</summary>
+    private const int DefaultIconProbeLayerMask = 2049;
+
     // =====================================================================
     // 1. ExhibitionRoot + ExhibitManager
     // =====================================================================
@@ -593,6 +596,35 @@ public static partial class ExhibitDescriptorTools
         }
     }
 
+    /// <summary>
+    /// 같은 Scene 의 <see cref="ExhibitDescriptorSettings.iconProbeLayers"/> 를 Manager 의
+    /// <c>iconProbeLayerMask</c>(int) 에 굽습니다.
+    ///
+    /// 사람이 비워 두면(0) 기본값으로 되돌립니다. 0 은 "아무 레이어도 보지 않음" 이라 그대로 구우면
+    /// 벽 측정이 통째로 죽어 아이콘이 다시 벽에 잠깁니다.
+    /// </summary>
+    private static void BakeIconProbeLayers(ExhibitManager manager)
+    {
+        if (manager == null) return;
+
+        int mask = DefaultIconProbeLayerMask;
+
+        List<ExhibitDescriptorSettings> settings = CollectSettingsInScene(manager.gameObject.scene);
+        for (int i = 0; i < settings.Count; i++)
+        {
+            int value = settings[i].iconProbeLayers.value;
+            if (value != 0) { mask = value; break; }
+        }
+
+        SerializedObject so = new SerializedObject(manager);
+        SetInt(so, "iconProbeLayerMask", mask);
+        so.ApplyModifiedProperties();
+
+        EditorUtility.SetDirty(manager);
+        UdonSharpEditorUtility.CopyProxyToUdon(manager);
+        RecordPrefabModifications(manager);
+    }
+
     /// <summary>언어 전환 버튼에 같은 Scene 의 Manager 를 연결합니다.</summary>
     private static void SetupLanguageSwitch(ExhibitLanguageSwitch languageSwitch)
     {
@@ -674,6 +706,9 @@ public static partial class ExhibitDescriptorTools
 
 
         so.ApplyModifiedProperties(); // Undo 지원 (Ctrl+Z 로 되돌릴 수 있음)
+
+        // 벽 판정 레이어는 전시 전체 설정이므로 작품마다 같은 값을 Manager 에 굽습니다. (멱등)
+        BakeIconProbeLayers(manager);
 
         // 런타임이 아이콘을 놓는 데 쓰는 기하 정보는 **매번 다시 굽습니다.**
         // 이것이 "Mesh 를 교체·이동·스케일해도 아이콘이 자동으로 따라온다" 의 실현 지점입니다.
