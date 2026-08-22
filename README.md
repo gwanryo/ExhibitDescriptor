@@ -27,6 +27,25 @@ side = sign( dot(head - artworkCenter, thinAxisWorld) )
 **제거된 것:** `ExhibitInteractRelay` 컴포넌트, `InteractionArea` / `OverlayAnchor` 오브젝트,
 `snapToAnchorOnOpen` / `overlayAnchor` / `interactRelays` 필드, 작품 Root 의 `Interact()`.
 
+### 2.1 — 벽에 잠기지 않게
+
+Panel 과 아이콘은 관람자를 향해 회전합니다. 그래서 벽면 바로 앞에 두면 비스듬히 볼 때 한쪽 절반이
+벽 안으로 들어갑니다(폭 0.6m 판을 30도 기울이면 약 0.15m). 2.1 은 그 자리에서 **앞·뒤로 Raycast 를
+한 번씩 쏴 빈 구간을 재고**, 기울어진 만큼만 관람자 쪽으로 빼냅니다.
+
+- 정면에서 볼 때는 벽에 붙어 있고, 비스듬히 볼 때만 필요한 만큼 나옵니다
+- 벽이 없으면(열린 공간) 예전과 같이 밀착합니다
+- 앞에 벽감 턱이 있으면 그것도 뚫지 않습니다
+- 작품마다 채울 숫자는 없습니다. 전시 전체에 `Icon Probe Layers` 와 `Icon Clearance` 둘뿐입니다
+- 측정은 아이콘이 켜질 때와 Panel 을 열 때만 합니다. 걸어서 자리가 0.15m 이상 옮겨가면 다시 잽니다
+  (제자리에서 고개만 돌릴 때는 재지 않습니다)
+- 들어갈 자리가 없는 벽감은 `Validate Scene` 이 저작 시점에 경고합니다
+
+Panel 이 열려 있는 동안에는 아이콘도 함께 고정됩니다. 그래야 읽는 중에 걸어 다녀도 아이콘이 Panel
+을 떠나지 않습니다. 두 판을 같은 평면에 억지로 맞추지는 않습니다 — 각자 관람자를 향하므로 애초에
+같은 평면이 될 수 없고, 정투영하면 아이콘이 오히려 벽 쪽으로 밀립니다. 아이콘이 Panel 평면 뒤로
+갈 때만 관람자 쪽으로 당깁니다.
+
 **1.x 로 만든 씬 마이그레이션:** `Tools > Exhibit Descriptor > Migrate Exhibits From 1.x` 를 한 번
 실행하면 `InteractionArea` / `OverlayAnchor` 를 제거하고 아이콘을 만들어 연결합니다. (Ctrl+Z 로 되돌릴 수 있습니다)
 `Setup` 은 아이콘이 없는 작품에 아이콘을 만들어 주기만 하고, **오브젝트를 지우지는 않습니다** —
@@ -285,6 +304,7 @@ ExhibitionRoot
 | **Gaze Exit Angle** | `45`° — 아이콘이 **유지되는** 시선 각 (조준하려 고개를 돌려도 사라지지 않게) |
 | **Icon Fade Duration** | `0.12` 초 |
 | **Icon Scan Per Frame** | `8` — 프레임당 근접 스캔 개수 (작품 100개면 한 바퀴 ≈ 13프레임) |
+| **Icon Clearance** | `0.02` m — 아이콘/Panel 이 벽·작품 면에서 최소한 떨어질 거리 |
 
 > 방향 / 여백 / 높이 / 거리는 **런타임에 해석**하므로 Manager 값을 바꾸면 Setup 을 다시 돌리지 않아도
 > 즉시 반영됩니다. `Default Icon Size` 만 아이콘의 실제 크기를 바꾸므로 Setup 이 굽습니다.
@@ -293,6 +313,7 @@ ExhibitionRoot
 
 | 필드 | 기본값 |
 |---|---|
+| **Icon Probe Layers** | 비움 → `Default` + `Environment`. 아이콘/Panel 이 "벽" 으로 취급할 Layer (Setup 이 Manager 에 int 로 구움) |
 | **Overlay Font** | 비움 → TMP 기본 폰트. **한글/일본어를 쓰면 반드시 CJK Font Asset 지정** (Setup 이 Overlay·언어 전환 버튼에 적용) |
 
 > `TMP_FontAsset` 은 Udon 화이트리스트에 없어 `ExhibitManager`(U#) 의 필드로 둘 수 없습니다.

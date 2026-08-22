@@ -114,6 +114,7 @@ Tools > Exhibit Descriptor > Create Exhibits From Selected Meshes
 | 굽는 기하 | 작품 Bounds 의 중심 / extents / 가장 얇은 축 (전부 작품 로컬 좌표) |
 | 아이콘 크기 | `iconSize`(기본 0.08m) 를 아이콘 Scale 과 BoxCollider 에 반영. Collider 는 조준 편의를 위해 1.75배(최소 0.14m) |
 | 아이콘 위치·방향 | **굽지 않습니다.** 런타임이 매 프레임 플레이어 머리 위치로 계산합니다 |
+| 벽과의 거리 | 런타임이 아이콘 자리에서 앞뒤로 Raycast 해서 정합니다. 손댈 값이 없습니다 |
 | `Title KR` | 원본 오브젝트 이름 (EN/JP 는 비워 두어 KR 로 fallback) |
 | 참조 연결 / Interact 값 | Setup 까지 자동 실행 |
 
