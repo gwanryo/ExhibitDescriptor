@@ -378,7 +378,16 @@ public class ExhibitInteractable : UdonSharpBehaviour
             _MeasureCorridorAt(spot, front);
         }
 
-        Vector3 iconPosition = spot + front * 0.02f;
+        // 작품 OBB 의 front 방향 반두께 (halfExtent 와 같은 식, 축만 front)
+        float depthHalf =
+            Mathf.Abs(Vector3.Dot(front, transform.right)) * boundsExtentsLocal.x +
+            Mathf.Abs(Vector3.Dot(front, transform.up)) * boundsExtentsLocal.y +
+            Mathf.Abs(Vector3.Dot(front, transform.forward)) * boundsExtentsLocal.z;
+
+        float iconHalf = _IconColliderHalfSize();
+        float iconStandoff = _ResolveStandoff(spot, front, headPosition, iconHalf, iconHalf, depthHalf);
+
+        Vector3 iconPosition = spot + front * iconStandoff;
 
         // World Space Canvas 는 자기 forward 의 <반대쪽>에 선 사람에게 글자가 정방향으로 읽힙니다.
         // 그래서 관람자를 "바라보게" 하지 않고, 관람자에게서 멀어지는 쪽을 forward 로 둡니다.
@@ -590,6 +599,75 @@ public class ExhibitInteractable : UdonSharpBehaviour
         _corridorMeasuredAt = spot;
         _corridorBack = _ProbeToward(spot, -front);
         _corridorFront = _ProbeToward(spot, front);
+    }
+
+    /// <summary>
+    /// 관람자를 향해 기울어진 판이 벽에 잠기지 않도록, <paramref name="front"/> 방향으로 밀어낼
+    /// 거리를 정합니다.
+    ///
+    /// <b>왜 필요한가:</b> 판은 관람자를 향해 회전하는데 위치는 작품 평면 근처입니다. 폭이 있는 판을
+    /// 벽면 바로 앞에서 기울이면 한쪽 절반이 벽 안으로 들어갑니다. 파고드는 깊이는
+    /// <c>반폭 × sin(기울기)</c> 이고, 아래 <c>deepest</c> 가 바로 그 값입니다.
+    ///
+    /// <b>2회 반복하는 이유:</b> deepest 는 판의 회전에서 나오고 회전은 위치에서 나오며 위치는 다시
+    /// standoff 에서 나오므로 순환합니다. 1회로 끝내면 Panel 반폭 0.3m 에서 최대 6cm 정도 덜
+    /// 빠져나와 clearance 를 넘습니다. 각 반복은 dot 몇 개와 LookRotation 한 번이라 무해합니다.
+    ///
+    /// 빈 구간(<see cref="_corridorBack"/> / <see cref="_corridorFront"/>)은 호출 전에
+    /// <see cref="_MeasureCorridorAt"/> 로 <b>그 판의 자리에서</b> 재 둬야 합니다.
+    /// </summary>
+    private float _ResolveStandoff(Vector3 spot, Vector3 front, Vector3 headPosition,
+                                  float halfWidth, float halfHeight, float depthHalf)
+    {
+        float clearance = _IconClearance();
+        float standoff = depthHalf + clearance;
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            Quaternion rotation = Quaternion.LookRotation(spot + front * standoff - headPosition, Vector3.up);
+
+            // 기울어진 판이 뒤로 파고드는 양
+            float deepest = Mathf.Abs(Vector3.Dot(front, rotation * Vector3.right)) * halfWidth +
+                            Mathf.Abs(Vector3.Dot(front, rotation * Vector3.up)) * halfHeight;
+
+            // 하한: 작품 면보다 앞 + (벽을 쟀다면) 벽면보다 앞
+            float lower = depthHalf + clearance;
+            if (_corridorBack >= 0f)
+            {
+                float wallLimit = deepest + clearance - _corridorBack;
+                if (wallLimit > lower) lower = wallLimit;
+            }
+
+            standoff = lower;
+
+            // 상한: (앞에 무언가 있다면) 그것을 뚫지 않는다. 구간이 좁으면 최대한 앞으로.
+            if (_corridorFront >= 0f)
+            {
+                float upper = _corridorFront - deepest - clearance;
+                if (standoff > upper) standoff = upper;
+            }
+        }
+
+        return standoff;
+    }
+
+    private float _IconClearance()
+    {
+        if (Utilities.IsValid(manager)) return manager.iconClearance;
+        return 0.02f;
+    }
+
+    /// <summary>
+    /// 아이콘 판의 반폭(m). Editor 의 Setup 이 Collider 를 렌더 크기의 1.75배(최소 0.14m)로 굽기
+    /// 때문에, 벽에 잠기는지 판단할 때도 렌더 크기가 아니라 <b>Collider 크기</b>를 기준으로 잡습니다.
+    /// (아이콘이 잠기면 그림보다 클릭이 먼저 막힙니다)
+    /// </summary>
+    private float _IconColliderHalfSize()
+    {
+        float size = overrideIconSettings ? iconSize : (Utilities.IsValid(manager) ? manager.defaultIconSize : iconSize);
+        float collider = size * 1.75f;
+        if (collider < 0.14f) collider = 0.14f;
+        return collider * 0.5f;
     }
 
     /// <summary>맞힌 표면까지의 거리(m). 아무것도 없으면 -1 (= 제약 없음).</summary>
