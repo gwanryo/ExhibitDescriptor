@@ -658,9 +658,13 @@ public class ExhibitInteractable : UdonSharpBehaviour
     /// 벽면 바로 앞에서 기울이면 한쪽 절반이 벽 안으로 들어갑니다. 파고드는 깊이는
     /// <c>반폭 × sin(기울기)</c> 이고, 아래 <c>deepest</c> 가 바로 그 값입니다.
     ///
-    /// <b>2회 반복하는 이유:</b> deepest 는 판의 회전에서 나오고 회전은 위치에서 나오며 위치는 다시
-    /// standoff 에서 나오므로 순환합니다. 1회로 끝내면 Panel 반폭 0.3m 에서 최대 6cm 정도 덜
-    /// 빠져나와 clearance 를 넘습니다. 각 반복은 dot 몇 개와 LookRotation 한 번이라 무해합니다.
+    /// <b>순환과 2회 반복:</b> deepest 는 판의 회전에서 나오고, 회전은 위치에서, 위치는 다시
+    /// standoff 에서 나오므로 순환합니다. 이 순환은 <b>돌려준 standoff 와 짝이 맞는 회전
+    /// (<see cref="_resolvedRotation"/>)을 그대로 적용</b>하는 것으로 끊습니다. 그래서 여백 보장은
+    /// 반복 횟수와 무관하게 정확히 성립합니다(1회로도 성립 — 테스트로 확인).
+    /// 2회를 도는 것은 보장을 위해서가 아니라, 적용되는 회전이 최종 위치에서 본 방향에 더 가깝게
+    /// 만들기 위한 것입니다. 1회면 회전을 0.04m 지점에서 구하는데 최종 위치는 0.2m 앞일 수 있어
+    /// 판이 몇 도 비스듬해집니다. 각 반복은 dot 몇 개와 LookRotation 한 번이라 무해합니다.
     ///
     /// 빈 구간(<see cref="_corridorBack"/> / <see cref="_corridorFront"/>)은 호출 전에
     /// <see cref="_MeasureCorridorAt"/> 로 <b>그 판의 자리에서</b> 재 둬야 합니다.
