@@ -1458,6 +1458,7 @@ public static partial class ExhibitDescriptorTools
                 // 저작 시점에 "여기엔 Panel 이 들어갈 자리가 없다" 를 알려 줍니다.
                 // 런타임은 최대한 앞으로 클램프하지만, 그 상태를 조용히 두면 왜 잠기는지 알 수 없습니다.
                 WarnIfNoRoomForPanel(exhibit, path);
+                WarnIfSidewaysIsBlocked(exhibit, path);
             }
 
             // 작품 정면을 덮는 Collider 는 감상을 방해합니다. (1.x 의 InteractionArea 잔재 포함)
@@ -1609,6 +1610,95 @@ public static partial class ExhibitDescriptorTools
         Debug.LogWarning("[ExhibitDescriptor] 아이콘 자리의 앞뒤 여유가 " + (back + forward).ToString("0.00") +
                          "m 뿐이라 Panel(" + needed.ToString("0.00") + "m 필요)이 벽에 잠깁니다. " +
                          "Icon Placement 를 다른 쪽으로 바꾸세요: " + path, exhibit);
+    }
+
+    /// <summary>
+    /// 아이콘이 붙는 <b>옆방향</b>에 Panel 이 들어갈 자리가 있는지 봅니다. 모서리에 걸린 작품을 찾는 검사입니다.
+    ///
+    /// 런타임은 사람이 고른 <c>Icon Placement</c> 를 존중하고 자동으로 뒤집지 않습니다. Right/Left 는
+    /// 관람자 기준이라 관람자가 걸어 다니면 판정이 경계에서 흔들리고, 그러면 아이콘이 좌우로 튀어
+    /// 클리핑보다 나쁜 증상이 됩니다. 그래서 <b>고르는 일은 사람이, 찾는 일은 이 검사가</b> 합니다.
+    ///
+    /// 필요한 여유는 "작품 가장자리 → 여백 → Panel 전체 폭" 입니다. 반대쪽이 넉넉하면 그쪽을 권합니다.
+    /// </summary>
+    private static void WarnIfSidewaysIsBlocked(ExhibitInteractable exhibit, string path)
+    {
+        SerializedObject so = new SerializedObject(exhibit);
+
+        SerializedProperty extentsProperty = so.FindProperty("boundsExtentsLocal");
+        if (extentsProperty == null || extentsProperty.vector3Value.sqrMagnitude <= 0f) return;
+
+        int placement = so.FindProperty("iconPlacement").enumValueIndex;
+        ExhibitManager manager = FindManagerForScene(exhibit);
+
+        if (placement == (int)ExhibitIconPlacement.Default)
+        {
+            placement = manager != null ? (int)manager.defaultIconPlacement : (int)ExhibitIconPlacement.Right;
+        }
+        // Above / Below 는 월드 Y 고정이라 이 검사의 대상이 아닙니다. (앞뒤 검사가 이미 봅니다)
+        if (placement != (int)ExhibitIconPlacement.Right && placement != (int)ExhibitIconPlacement.Left) return;
+
+        Vector3 extents = extentsProperty.vector3Value;
+        Vector3 centerLocal = so.FindProperty("boundsCenterLocal").vector3Value;
+        int thinAxis = so.FindProperty("thinAxis").intValue;
+
+        int mask = manager != null ? manager.iconProbeLayerMask : DefaultIconProbeLayerMask;
+        float clearance = manager != null ? manager.iconClearance : 0.02f;
+        float gap = manager != null ? manager.defaultIconGap : 0.15f;
+
+        Transform t = exhibit.transform;
+        Vector3 center = t.TransformPoint(centerLocal);
+        Vector3 axis = t.rotation * (thinAxis == 0 ? Vector3.right : (thinAxis == 1 ? Vector3.up : Vector3.forward));
+
+        // 관람자가 설 수 있는 쪽을 정면으로 봅니다.
+        RaycastHit hit;
+        bool positiveBlocked = Physics.Raycast(center, axis, out hit, 1f, mask, QueryTriggerInteraction.Ignore);
+        bool negativeBlocked = Physics.Raycast(center, -axis, out hit, 1f, mask, QueryTriggerInteraction.Ignore);
+        Vector3 front = positiveBlocked && !negativeBlocked ? -axis : axis;
+
+        Vector3 flat = new Vector3(front.x, 0f, front.z);
+        if (flat.sqrMagnitude < 0.0001f) return;    // 바닥에 눕힌 작품은 옆방향이 정해지지 않습니다.
+        flat = flat.normalized;
+
+        Vector3 chosen = placement == (int)ExhibitIconPlacement.Left
+            ? Vector3.Cross(Vector3.up, flat)
+            : -Vector3.Cross(Vector3.up, flat);
+
+        float needed = gap + PanelWidth * CanvasScale + clearance;   // 여백 + Panel 전체 폭 + 여백
+
+        float chosenRoom = SidewaysRoom(exhibit, center, extents, chosen, needed, mask);
+        if (chosenRoom < 0f) return;                                  // 막히지 않았습니다.
+
+        float oppositeRoom = SidewaysRoom(exhibit, center, extents, -chosen, needed, mask);
+        string current = placement == (int)ExhibitIconPlacement.Left ? "Left" : "Right";
+        string suggestion = oppositeRoom < 0f
+            ? "반대쪽(" + (current == "Left" ? "Right" : "Left") + ")은 여유가 있습니다"
+            : "반대쪽도 좁습니다 (" + oppositeRoom.ToString("0.00") + "m) — Above 또는 Below 를 쓰세요";
+
+        Debug.LogWarning("[ExhibitDescriptor] " + current + " 쪽 옆 여유가 " + chosenRoom.ToString("0.00") +
+                         "m 뿐이라 Panel(" + needed.ToString("0.00") + "m 필요)이 옆 벽에 물립니다. " +
+                         suggestion + ": " + path, exhibit);
+    }
+
+    /// <summary>
+    /// <paramref name="direction"/> 쪽으로 Panel 이 들어갈 자리가 있는지. 막혔으면 그 거리(m),
+    /// 충분하면 -1 을 돌려줍니다.
+    /// </summary>
+    private static float SidewaysRoom(ExhibitInteractable exhibit, Vector3 center, Vector3 extents,
+                                      Vector3 direction, float needed, int mask)
+    {
+        Transform t = exhibit.transform;
+
+        float halfExtent =
+            Mathf.Abs(Vector3.Dot(direction, t.right)) * extents.x +
+            Mathf.Abs(Vector3.Dot(direction, t.up)) * extents.y +
+            Mathf.Abs(Vector3.Dot(direction, t.forward)) * extents.z;
+
+        Vector3 edge = center + direction * halfExtent;
+
+        RaycastHit hit;
+        if (!Physics.Raycast(edge, direction, out hit, needed, mask, QueryTriggerInteraction.Ignore)) return -1f;
+        return hit.distance;
     }
 
     // 폰트 검사용 표본 문자

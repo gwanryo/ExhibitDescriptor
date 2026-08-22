@@ -70,18 +70,31 @@ jobs:
           mkdir -p _site manifests
 
           # 각 릴리즈의 package.json 에는 release.yml 이 url / zipSHA256 을 이미 넣어 두었습니다.
+          # 릴리즈마다 자산 이름이 똑같이 package.json 이므로, 저장할 파일명은 자산 id 로 짓습니다.
+          # 자산마다 다른 이름이 나오지 않으면 뒤에 받은 것이 앞의 것을 덮어써 버립니다.
           gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
-            --jq '.[] | select(.draft == false) | .assets[] | select(.name == "package.json") | [.browser_download_url, (.url | split("/") | .[-2])] | @tsv' \
+            --jq '.[] | select(.draft == false) | .assets[] | select(.name == "package.json") | [.browser_download_url, (.id | tostring)] | @tsv' \
             > assets.tsv || true
 
           count=0
           while IFS=$'\t' read -r url asset_id; do
             [ -z "${url:-}" ] && continue
+            if [ -z "${asset_id:-}" ]; then
+              echo "::error::자산 id 를 읽지 못했습니다: ${url}"
+              exit 1
+            fi
             curl -fsSL "$url" -o "manifests/${asset_id}.json"
             count=$((count + 1))
           done < assets.tsv
 
-          echo "내려받은 package.json: ${count} 개"
+          # 파일명이 겹치면 조용히 덮어써져 리스팅에 릴리즈 하나만 남습니다. 여기서 잡습니다.
+          saved=$(find manifests -name '*.json' -type f | wc -l)
+          echo "내려받은 package.json: ${count} 개 (저장된 파일 ${saved} 개)"
+
+          if [ "$count" -ne "$saved" ]; then
+            echo "::error::자산 ${count} 개가 파일 ${saved} 개로 덮어써졌습니다. 파일명 계산이 잘못되었습니다."
+            exit 1
+          fi
 
       - name: index.json 생성
         run: |
