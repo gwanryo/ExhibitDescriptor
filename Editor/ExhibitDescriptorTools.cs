@@ -20,6 +20,7 @@ using VRC.Udon;
 ///   - Setup Selected Exhibits           : 선택한 작품들의 참조 자동 연결 + Interact 값 반영
 ///   - Setup All Exhibits In Scene       : 씬 전체 일괄 처리 (100개 이상일 때 사용)
 ///   - Migrate Exhibits From 1.x         : 1.x 의 InteractionArea / OverlayAnchor 제거
+///   - Migrate Overlay Layout            : 2.1 이하의 판넬 안 버튼을 판넬 밖 버튼 열로 이동
 ///   - Auto Setup On Save                : 저장할 때 자동으로 Setup 실행 (ExhibitDescriptorBatchTools.cs)
 ///   - Validate Scene                    : 누락된 참조/Collider 를 콘솔에 보고
 ///
@@ -33,6 +34,38 @@ public static partial class ExhibitDescriptorTools
     private const float PanelWidth = 600f;
     private const float PanelHeight = 440f;
     private const float CanvasScale = 0.001f;
+
+    /// <summary>
+    /// 버튼 열의 폭(px)과 본문 판넬과의 간격(px).
+    ///
+    /// 버튼이 본문 <b>위에</b> 있으면 안 되는 이유: VRChat 의 Interact 툴팁은 Collider 위쪽으로
+    /// 자라고 가로로는 Collider 중심에 정렬됩니다. 버튼이 판넬 안에 있으면 "위로/아래로/닫기"
+    /// 툴팁이 본문 글자와 겹쳐 읽을 수 없습니다(실기에서 확인). 그래서 버튼은 판넬 배경 밖의
+    /// 별도 열로 빼냅니다.
+    ///
+    /// 폭 96px 의 근거: 버튼(80px)이 열 가운데 놓이므로 툴팁 중심은 Canvas 왼쪽에서 656px,
+    /// 본문 글자의 오른쪽 끝은 572px 입니다. 즉 글자까지 84px(8.4cm)의 여유가 있어 툴팁 전체
+    /// 폭이 16.8cm 를 넘지 않는 한 글자를 건드리지 않습니다.
+    /// </summary>
+    private const float ButtonColumnWidth = 96f;
+    private const float ButtonColumnGap = 8f;
+
+    /// <summary>
+    /// Overlay Canvas 의 전체 폭(px) = 본문 판넬 + 간격 + 버튼 열.
+    ///
+    /// 벽 여유 검사는 <b>반드시 이 값</b>을 써야 합니다. 런타임은
+    /// <c>ExhibitOverlay._GetWorldHalfWidth()</c> 로 RectTransform 에서 실제 폭을 읽으므로,
+    /// 검사가 PanelWidth 만 보면 버튼 열만큼 과소평가해 판넬이 옆 벽에 물립니다.
+    /// </summary>
+    private const float OverlayWidth = PanelWidth + ButtonColumnGap + ButtonColumnWidth;
+
+    /// <summary>버튼 한 개의 크기(px)와 버튼 사이 간격(px).</summary>
+    private const float OverlayButtonWidth = 80f;
+    private const float OverlayButtonHeight = 60f;
+    private const float OverlayButtonGap = 8f;
+
+    /// <summary>닫기 버튼과 스크롤 버튼 사이를 더 벌립니다. (오조작 방지)</summary>
+    private const float CloseButtonGap = 16f;
 
     // 아이콘 Canvas 의 로컬 단위(px). 실제 크기는 localScale = iconSize / IconCanvasSize 로 맞춥니다.
     private const float IconCanvasSize = 100f;
@@ -371,15 +404,22 @@ public static partial class ExhibitDescriptorTools
         canvas.renderMode = RenderMode.WorldSpace;
 
         RectTransform canvasRect = overlayObject.GetComponent<RectTransform>();
-        canvasRect.sizeDelta = new Vector2(PanelWidth, PanelHeight);
+        canvasRect.sizeDelta = new Vector2(OverlayWidth, PanelHeight);
         canvasRect.localScale = new Vector3(CanvasScale, CanvasScale, CanvasScale);
 
         overlayObject.AddComponent<CanvasGroup>();
 
         // ---- Panel (Scale 애니메이션 대상) --------------------------------
+        // Canvas 전체가 아니라 왼쪽 PanelWidth 만 차지합니다. 남는 오른쪽은 버튼 열 자리입니다.
+        // (어느 쪽 Canvas 가장자리가 아이콘에 닿는지는 배치에 따라 다릅니다. Right 배치면 버튼 열이
+        //  작품에서 먼 쪽, Left 배치면 숨은 아이콘 쪽에 놓입니다. 둘 다 본문 밖이라 문제없습니다)
         GameObject panel = CreateUIObject("Panel", overlayObject.transform);
         RectTransform panelRect = panel.GetComponent<RectTransform>();
-        Stretch(panelRect);
+        panelRect.anchorMin = new Vector2(0f, 0f);
+        panelRect.anchorMax = new Vector2(0f, 1f);
+        panelRect.pivot = new Vector2(0f, 0.5f);
+        panelRect.sizeDelta = new Vector2(PanelWidth, 0f);
+        panelRect.anchoredPosition = Vector2.zero;
         Image panelImage = panel.AddComponent<Image>();
         panelImage.color = new Color(0.04f, 0.04f, 0.06f, 0.86f);
         panelImage.raycastTarget = false;
@@ -414,7 +454,8 @@ public static partial class ExhibitDescriptorTools
         RectTransform scrollRect = scrollView.GetComponent<RectTransform>();
         scrollRect.anchorMin = new Vector2(0f, 0f);
         scrollRect.anchorMax = new Vector2(1f, 1f);
-        scrollRect.offsetMin = new Vector2(28f, 96f);   // 아래쪽 버튼 영역 확보
+        // 버튼이 옆 열로 나갔으므로 아래쪽을 본문이 그대로 씁니다. (2.1 대비 68px 더 읽힙니다)
+        scrollRect.offsetMin = new Vector2(28f, 28f);
         scrollRect.offsetMax = new Vector2(-28f, -122f);
 
         GameObject viewport = CreateUIObject("Viewport", scrollView.transform);
@@ -445,15 +486,45 @@ public static partial class ExhibitDescriptorTools
         ConfigureText(description, 26f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
         description.text = "Description";
 
-        // ---- Buttons ------------------------------------------------------
+        // ---- ButtonColumn -------------------------------------------------
+        BuildButtonColumn(panel.transform);
+
+        return overlayObject;
+    }
+
+    /// <summary>
+    /// 본문 판넬 <b>바깥</b> 오른쪽에 버튼 열을 세웁니다. (× / ▲ / ▼)
+    ///
+    /// Panel 의 자식인 이유: <c>ExhibitOverlay.scaleRoot</c> 가 Panel 이므로 열도 같이 열림
+    /// 애니메이션(0.92 -> 1.0)을 탑니다. Canvas 직속으로 두면 판넬만 커지고 버튼은 제자리에
+    /// 튀어 있습니다. UI 자식은 부모 rect 밖으로 나가도 잘리지 않으므로(Panel 에 Mask 없음)
+    /// 판넬 오른쪽 바깥에 그대로 그려집니다.
+    /// </summary>
+    private static Transform BuildButtonColumn(Transform panel)
+    {
+        GameObject column = CreateUIObject("ButtonColumn", panel);
+        RectTransform columnRect = column.GetComponent<RectTransform>();
+        columnRect.anchorMin = new Vector2(1f, 0f);
+        columnRect.anchorMax = new Vector2(1f, 1f);
+        columnRect.pivot = new Vector2(0f, 0.5f);
+        columnRect.sizeDelta = new Vector2(ButtonColumnWidth, 0f);
+        columnRect.anchoredPosition = new Vector2(ButtonColumnGap, 0f);
+
         // 라벨 문자는 TMP 기본 폰트(LiberationSans SDF)의 fallback 으로도 그려지는 것만 씁니다.
         //  - ▲ U+25B2 / ▼ U+25BC : fallback 에 있어 정상 표시
         //  - ✕ U+2715 : 본 폰트에도 fallback 에도 없어 □ 로 보였습니다. → × U+00D7 로 교체
-        CreateButton(panel.transform, "ScrollUpButton", "▲", new Vector2(0f, 0f), new Vector2(28f, 24f), new Vector2(64f, 60f));
-        CreateButton(panel.transform, "ScrollDownButton", "▼", new Vector2(0f, 0f), new Vector2(100f, 24f), new Vector2(64f, 60f));
-        CreateButton(panel.transform, "CloseButton", "×", new Vector2(1f, 0f), new Vector2(-28f, 24f), new Vector2(140f, 60f));
+        Vector2 top = new Vector2(0.5f, 1f);
+        Vector2 size = new Vector2(OverlayButtonWidth, OverlayButtonHeight);
 
-        return overlayObject;
+        float closeY = 0f;
+        float upY = closeY - (OverlayButtonHeight + CloseButtonGap);
+        float downY = upY - (OverlayButtonHeight + OverlayButtonGap);
+
+        CreateButton(column.transform, "CloseButton", "×", top, new Vector2(0f, closeY), size);
+        CreateButton(column.transform, "ScrollUpButton", "▲", top, new Vector2(0f, upY), size);
+        CreateButton(column.transform, "ScrollDownButton", "▼", top, new Vector2(0f, downY), size);
+
+        return column.transform;
     }
 
     private static void CreateButton(Transform parent, string name, string label, Vector2 anchor, Vector2 anchoredPosition, Vector2 size)
@@ -461,21 +532,12 @@ public static partial class ExhibitDescriptorTools
         GameObject buttonObject = CreateUIObject(name, parent);
         buttonObject.layer = 0; // Default: Udon Interact 가 확실하게 인식하는 Layer
 
-        RectTransform rect = buttonObject.GetComponent<RectTransform>();
-        rect.anchorMin = anchor;
-        rect.anchorMax = anchor;
-        rect.pivot = new Vector2(anchor.x, anchor.y);
-        rect.sizeDelta = size;
-        rect.anchoredPosition = anchoredPosition;
-
         Image image = buttonObject.AddComponent<Image>();
         image.color = new Color(0.22f, 0.24f, 0.30f, 0.95f);
         image.raycastTarget = false;
 
-        BoxCollider collider = buttonObject.AddComponent<BoxCollider>();
-        collider.size = new Vector3(size.x, size.y, 10f);
-        collider.center = new Vector3(size.x * (0.5f - anchor.x), size.y * (0.5f - anchor.y), 0f);
-        collider.isTrigger = true;
+        buttonObject.AddComponent<BoxCollider>();
+        PlaceButton(buttonObject.transform, anchor, anchoredPosition, size);
 
         GameObject labelObject = CreateUIObject("Label", buttonObject.transform);
         labelObject.layer = 0;
@@ -484,6 +546,40 @@ public static partial class ExhibitDescriptorTools
         TextMeshProUGUI text = labelObject.AddComponent<TextMeshProUGUI>();
         ConfigureText(text, 30f, FontStyles.Bold, TextAlignmentOptions.Center);
         text.text = label;
+    }
+
+    /// <summary>
+    /// 버튼의 RectTransform 과 BoxCollider 를 한 자리에 맞춥니다.
+    ///
+    /// 생성(<see cref="CreateButton"/>)과 이전(<see cref="MigrateOverlayLayout"/>)이 같은 함수를
+    /// 쓰기 때문에 Collider 중심 계산이 두 곳으로 갈라지지 않습니다. Collider 가 rect 와 어긋나면
+    /// 보이는 곳과 눌리는 곳이 달라집니다.
+    ///
+    /// <paramref name="record"/> 가 true 면 Undo 에 기록합니다. (이미 Scene 에 있는 버튼을 옮길 때)
+    /// </summary>
+    private static void PlaceButton(Transform button, Vector2 anchor, Vector2 anchoredPosition,
+                                    Vector2 size, bool record = false)
+    {
+        RectTransform rect = button.GetComponent<RectTransform>();
+        BoxCollider collider = button.GetComponent<BoxCollider>();
+
+        if (record)
+        {
+            Undo.RecordObject(rect, "Place Overlay Button");
+            if (collider != null) Undo.RecordObject(collider, "Place Overlay Button");
+        }
+
+        rect.anchorMin = anchor;
+        rect.anchorMax = anchor;
+        rect.pivot = new Vector2(anchor.x, anchor.y);
+        rect.sizeDelta = size;
+        rect.anchoredPosition = anchoredPosition;
+
+        if (collider == null) return;
+
+        collider.size = new Vector3(size.x, size.y, 10f);
+        collider.center = new Vector3(size.x * (0.5f - anchor.x), size.y * (0.5f - anchor.y), 0f);
+        collider.isTrigger = true;
     }
 
     private static void AttachButton(GameObject overlayObject, string name, ExhibitButtonAction action, string kr, string en, string jp)
@@ -1196,10 +1292,16 @@ public static partial class ExhibitDescriptorTools
 
         int undoGroup = Undo.GetCurrentGroup();
         int removed = 0;
+        int relaid = 0;
 
         for (int i = 0; i < targets.Count; i++)
         {
             removed += RemoveLegacyParts(targets[i]);
+
+            // 1.x 씬의 Overlay 는 버튼이 판넬 안 아래쪽에 있습니다. 그대로 두면 Interact 툴팁이
+            // 본문을 덮으므로 여기서 함께 옮깁니다. (2.1 이하에서 올라오는 씬도 같은 처리가 필요합니다)
+            if (RelayoutOverlayButtons(targets[i])) relaid++;
+
             SetupExhibitFull(targets[i]);          // 아이콘 생성 + 참조 연결 + 기하 굽기
             MarkSceneDirtyFor(targets[i].gameObject);
         }
@@ -1208,8 +1310,151 @@ public static partial class ExhibitDescriptorTools
         Undo.CollapseUndoOperations(undoGroup);
 
         Debug.Log("[ExhibitDescriptor] 작품 " + targets.Count + " 개를 정리했습니다. " +
-                  "제거한 레거시 오브젝트 " + removed + " 개. " +
+                  "제거한 레거시 오브젝트 " + removed + " 개, 버튼 열로 옮긴 Overlay " + relaid + " 개. " +
                   "아이콘 위치는 런타임이 정하므로 수동 보정은 필요하지 않습니다. (Ctrl+Z 로 되돌릴 수 있습니다)");
+    }
+
+    /// <summary>
+    /// 2.1 이하의 Overlay(버튼이 판넬 안 아래쪽)를 2.2 배치(판넬 밖 오른쪽 버튼 열)로 옮깁니다.
+    ///
+    /// 왜 Setup 이 아니라 별도 메뉴인가: Setup 은 <c>Auto Setup On Save</c> 로 저장 직전에도 도는데,
+    /// 사람이 손으로 맞춰 둔 판넬 레이아웃을 저장할 때마다 도구가 조용히 재배치하면 안 됩니다.
+    /// 그래서 <see cref="ValidateScene"/> 이 옛 배치를 <b>찾아 알리고</b>, 옮기는 것은 이 메뉴가
+    /// 한 번 명시적으로 합니다.
+    /// </summary>
+    [MenuItem(MenuRoot + "Migrate Overlay Layout", false, 41)]
+    public static void MigrateOverlayLayout()
+    {
+        List<ExhibitInteractable> targets = CollectMigrationTargets();
+        if (targets.Count == 0)
+        {
+            Debug.LogWarning("[ExhibitDescriptor] 대상 작품이 없습니다. Hierarchy 에서 작품을 선택하거나 " +
+                             "작품이 있는 Scene 을 열어 두세요.");
+            return;
+        }
+
+        int undoGroup = Undo.GetCurrentGroup();
+        int relaid = 0;
+
+        for (int i = 0; i < targets.Count; i++)
+        {
+            if (!RelayoutOverlayButtons(targets[i])) continue;
+
+            relaid++;
+            MarkSceneDirtyFor(targets[i].gameObject);
+        }
+
+        Undo.SetCurrentGroupName("Migrate Overlay Layout");
+        Undo.CollapseUndoOperations(undoGroup);
+
+        if (relaid == 0)
+        {
+            Debug.Log("[ExhibitDescriptor] 작품 " + targets.Count + " 개 모두 이미 버튼 열 배치입니다. 바꾼 것이 없습니다.");
+            return;
+        }
+
+        Debug.Log("[ExhibitDescriptor] Overlay " + relaid + " 개를 버튼 열 배치로 옮겼습니다. " +
+                  "버튼이 본문 밖으로 나가 Interact 툴팁이 글자를 덮지 않습니다. (Ctrl+Z 로 되돌릴 수 있습니다)");
+    }
+
+    /// <summary>
+    /// Overlay 하나를 버튼 열 배치로 옮깁니다. 이미 옮겨져 있으면 아무것도 하지 않고 false.
+    ///
+    /// 판넬 폭은 <b>건드리지 않습니다.</b> 사람이 크기를 바꿔 둔 판넬도 그대로 두고, Canvas 만
+    /// 버튼 열 폭만큼 넓혀 남는 자리에 열을 세웁니다. 그래서 본문이 좁아지는 일이 없습니다.
+    /// </summary>
+    private static bool RelayoutOverlayButtons(ExhibitInteractable interactable)
+    {
+        ExhibitOverlay overlay = interactable.GetComponentInChildren<ExhibitOverlay>(true);
+        if (overlay == null) return false;
+
+        Transform panel = FindChildRecursive(overlay.transform, "Panel");
+        if (panel == null) return false;
+
+        // 이미 옮겨져 있으면 그대로 둡니다. (여러 번 실행해도 안전)
+        if (FindChildRecursive(panel, "ButtonColumn") != null) return false;
+
+        ExhibitOverlayButton[] buttons = overlay.GetComponentsInChildren<ExhibitOverlayButton>(true);
+        if (buttons.Length == 0) return false;
+
+        RectTransform canvasRect = overlay.GetComponent<RectTransform>();
+        RectTransform panelRect = panel.GetComponent<RectTransform>();
+        if (canvasRect == null || panelRect == null) return false;
+
+        float bodyWidth = canvasRect.sizeDelta.x;
+
+        Undo.RecordObject(canvasRect, "Migrate Overlay Layout");
+        Undo.RecordObject(panelRect, "Migrate Overlay Layout");
+
+        // Canvas 를 버튼 열만큼 넓히고, 판넬은 왼쪽에 원래 폭으로 고정합니다.
+        canvasRect.sizeDelta = new Vector2(bodyWidth + ButtonColumnGap + ButtonColumnWidth, canvasRect.sizeDelta.y);
+
+        panelRect.anchorMin = new Vector2(0f, 0f);
+        panelRect.anchorMax = new Vector2(0f, 1f);
+        panelRect.pivot = new Vector2(0f, 0.5f);
+        panelRect.sizeDelta = new Vector2(bodyWidth, 0f);
+        panelRect.anchoredPosition = Vector2.zero;
+
+        // 버튼 열을 세우고 기존 버튼을 그대로 옮깁니다.
+        // (새로 만들면 action / 언어 문구 / 구워 둔 proximity 와 Overlay 참조를 모두 잃습니다)
+        GameObject column = new GameObject("ButtonColumn", typeof(RectTransform));
+        Undo.RegisterCreatedObjectUndo(column, "Migrate Overlay Layout");
+        Undo.SetTransformParent(column.transform, panel, "Migrate Overlay Layout");
+
+        column.layer = panel.gameObject.layer;
+        RectTransform columnRect = column.GetComponent<RectTransform>();
+        columnRect.localPosition = Vector3.zero;
+        columnRect.localRotation = Quaternion.identity;
+        columnRect.localScale = Vector3.one;
+        columnRect.anchorMin = new Vector2(1f, 0f);
+        columnRect.anchorMax = new Vector2(1f, 1f);
+        columnRect.pivot = new Vector2(0f, 0.5f);
+        columnRect.sizeDelta = new Vector2(ButtonColumnWidth, 0f);
+        columnRect.anchoredPosition = new Vector2(ButtonColumnGap, 0f);
+
+        Vector2 top = new Vector2(0.5f, 1f);
+        Vector2 size = new Vector2(OverlayButtonWidth, OverlayButtonHeight);
+
+        float closeY = 0f;
+        float upY = closeY - (OverlayButtonHeight + CloseButtonGap);
+        float downY = upY - (OverlayButtonHeight + OverlayButtonGap);
+
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            ExhibitOverlayButton button = buttons[i];
+            if (button == null) continue;
+
+            Undo.SetTransformParent(button.transform, column.transform, "Migrate Overlay Layout");
+
+            int action = new SerializedObject(button).FindProperty("action").enumValueIndex;
+            float y = action == (int)ExhibitButtonAction.ScrollUp
+                ? upY
+                : (action == (int)ExhibitButtonAction.ScrollDown ? downY : closeY);
+
+            PlaceButton(button.transform, top, new Vector2(0f, y), size, true);
+        }
+
+        ReclaimButtonBand(panel);
+        return true;
+    }
+
+    /// <summary>
+    /// 버튼이 쓰던 판넬 아래쪽 띠를 본문에게 돌려줍니다.
+    ///
+    /// 기본값(96px)일 때만 손댑니다. 사람이 다른 값으로 맞춰 둔 여백은 그 사람의 의도이므로
+    /// 도구가 되돌리지 않습니다.
+    /// </summary>
+    private static void ReclaimButtonBand(Transform panel)
+    {
+        Transform scrollView = FindChildRecursive(panel, "DescriptionScrollView");
+        if (scrollView == null) return;
+
+        RectTransform scrollRect = scrollView.GetComponent<RectTransform>();
+        if (scrollRect == null) return;
+        if (!Mathf.Approximately(scrollRect.offsetMin.y, 96f)) return;
+
+        Undo.RecordObject(scrollRect, "Migrate Overlay Layout");
+        scrollRect.offsetMin = new Vector2(scrollRect.offsetMin.x, 28f);
     }
 
     private static List<ExhibitInteractable> CollectMigrationTargets()
@@ -1524,6 +1769,16 @@ public static partial class ExhibitDescriptorTools
             {
                 Debug.LogWarning("[ExhibitDescriptor] 버튼 Layer 가 Default 가 아닙니다(Interact 실패 가능): " + GetPath(button.transform), button);
             }
+
+            // 2.1 이하 배치: 버튼이 판넬 안에 있으면 Interact 툴팁이 본문 글자를 덮습니다.
+            // (툴팁은 Collider 위쪽으로 자라므로 버튼이 본문 아래에 있는 한 구조적으로 겹칩니다)
+            Transform parent = button.transform.parent;
+            if (parent != null && parent.name != "ButtonColumn")
+            {
+                Debug.LogWarning("[ExhibitDescriptor] 버튼이 판넬 안에 있어 Interact 툴팁이 설명 본문을 덮습니다. " +
+                                 "Tools > Exhibit Descriptor > Migrate Overlay Layout 을 실행하세요: " +
+                                 GetPath(button.transform), button);
+            }
         }
 
         ExhibitLanguageSwitch[] switches = Object.FindObjectsOfType<ExhibitLanguageSwitch>(true);
@@ -1604,7 +1859,7 @@ public static partial class ExhibitDescriptorTools
 
         if (back < 0f || forward < 0f) return;    // 한쪽이라도 열려 있으면 런타임이 해결합니다.
 
-        float needed = PanelWidth * CanvasScale * 0.5f + clearance * 2f;
+        float needed = OverlayWidth * CanvasScale * 0.5f + clearance * 2f;
         if (back + forward >= needed) return;
 
         Debug.LogWarning("[ExhibitDescriptor] 아이콘 자리의 앞뒤 여유가 " + (back + forward).ToString("0.00") +
@@ -1664,7 +1919,7 @@ public static partial class ExhibitDescriptorTools
             ? Vector3.Cross(Vector3.up, flat)
             : -Vector3.Cross(Vector3.up, flat);
 
-        float needed = gap + PanelWidth * CanvasScale + clearance;   // 여백 + Panel 전체 폭 + 여백
+        float needed = gap + OverlayWidth * CanvasScale + clearance;  // 여백 + Overlay 전체 폭(본문+버튼 열) + 여백
 
         float chosenRoom = SidewaysRoom(exhibit, center, extents, chosen, needed, mask);
         if (chosenRoom < 0f) return;                                  // 막히지 않았습니다.
