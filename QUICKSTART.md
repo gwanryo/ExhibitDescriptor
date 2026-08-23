@@ -80,7 +80,7 @@ EN / JP 는 **비워 둬도 됩니다.** 비어 있으면 자동으로 KR 로 �
 > **한글이 □ 로 보이면** 폰트 문제입니다. TMP 기본 폰트에는 한글 글리프가 없습니다.
 > CJK Font Asset 을 만들어 `ExhibitManager` 의 **`Exhibit Descriptor Settings > Overlay Font`** 에 넣고
 > `Tools > Exhibit Descriptor > Setup All Exhibits In Scene` 을 한 번 실행하세요.
-> (만드는 방법은 README 의 "CJK 폰트 준비")
+> (만드는 방법은 [README 의 "CJK 폰트"](README.md#-설정))
 
 ---
 
@@ -177,7 +177,7 @@ Auto Setup 을 꺼 뒀다면 이 둘만 기억하면 됩니다.
 
 ## 그 밖에
 
-- **한글이 □ 로 보임** — 폰트 문제입니다. README 의 `1단계 > CJK 폰트 준비` 만 보세요
+- **한글이 □ 로 보임** — 폰트 문제입니다. [README 의 "CJK 폰트"](README.md#-설정) 만 보세요
 - **뭔가 이상함** — `Tools > Exhibit Descriptor > Validate Scene` 이 원인을 Console 에 찍어 줍니다
 
 ---
@@ -187,10 +187,10 @@ Auto Setup 을 꺼 뒀다면 이 둘만 기억하면 됩니다.
 | 증상 | 원인 |
 |---|---|
 | 툴팁이 안 뜬다 | `Setup Selected Exhibits` 를 안 돌렸거나, 2m 밖에 서 있음 |
-| 한글이 □ | TMP 폰트에 CJK 글리프 없음 (README 1단계) |
+| 한글이 □ | TMP 폰트에 CJK 글리프 없음 (README 의 CJK 폰트) |
 | 월드 입장하자마자 Overlay 가 다 켜져 있음 | `Overlay` 오브젝트가 활성 상태로 저장됨 → 체크 해제 |
 | 버튼이 안 눌린다 | 버튼 Layer 가 `Default` 가 아님 |
 | Tools 메뉴가 없다 | UdonSharp 컴파일 에러 (Console 확인) |
 
-> README 는 "왜 이렇게 만들었나" 와 100개 이상 확장·최적화를 다루는 레퍼런스입니다.
+> README 는 설정값·에디터 도구·"왜 이렇게 만들었나" 를 다루는 레퍼런스입니다.
 > 위 4단계가 돌아간 다음에 필요할 때만 찾아보세요.
