@@ -1,6 +1,7 @@
 using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
+using VRC.Udon.Common;
 
 /// <summary>
 /// Scene 당 1개만 존재하는 전시 시스템 관리자.
@@ -37,13 +38,24 @@ public class ExhibitManager : UdonSharpBehaviour
     [Tooltip("Editor Tool 이 '작품별 Proximity' 를 일괄 적용할 때 사용할 기본값(m).")]
     [Min(0.1f)] public float defaultProximity = 2f;
 
-    // ---------------------------------------------------------------------
-    // Info Icon (응시형 ⓘ 아이콘) - 전시 전체 기본값
-    //
-    // 작품이 매 프레임 읽으므로 public 필드입니다. (defaultInteractionTextKR 과 같은 이유)
-    // 작품에서 override 를 켜지 않으면 여기 값이 그대로 쓰이므로, 전시 전체 배치를
-    // 필드 하나 수정으로 바꿀 수 있습니다.
-    // ---------------------------------------------------------------------
+    // 아래 값들은 작품이 매 프레임 직접 읽으므로 public 입니다. 작품에서 override 를 켜지 않으면
+    // 여기 값이 그대로 쓰이므로, 전시 전체를 필드 하나로 바꿀 수 있습니다.
+
+    [Header("Open Mode")]
+    [Tooltip("작품이 Default 로 두었을 때 설명을 여는 방식입니다.\n" +
+             "Icon: ⓘ 아이콘을 Interact 해서 엽니다.\n" +
+             "Proximity: 응시한 채로 다가가면 저절로 열리고 시선/거리를 벗어나면 닫힙니다. " +
+             "아이콘이 뜨지 않으므로 VR 에서 손으로 조준할 일이 없습니다.")]
+    public ExhibitOpenMode defaultOpenMode = ExhibitOpenMode.Icon;
+
+    [Tooltip("근접 모드에서 작품을 이만큼 계속 응시해야 Panel 이 열립니다(초). 0 이면 즉시.")]
+    [Min(0f)] public float proximityOpenDelay = 0.5f;
+
+    [Tooltip("근접 모드에서 저절로 닫힌 뒤 이 시간 동안은 다시 열리지 않습니다(초).")]
+    [Min(0f)] public float proximityCloseCooldown = 0.3f;
+
+    [Tooltip("근접 모드의 닫힘 거리 배수. 열림은 Gaze Distance, 닫힘은 그 값 × 이 배수입니다.")]
+    [Min(1f)] public float proximityExitRangeScale = 1.25f;
 
     [Header("Info Icon Defaults")]
     [Tooltip("작품이 Default 로 두었을 때 쓰는 아이콘 방향입니다.")]
@@ -80,20 +92,24 @@ public class ExhibitManager : UdonSharpBehaviour
     [Min(0f)] public float iconClearance = 0.02f;
 
     /// <summary>
-    /// 아이콘/Panel 이 "벽" 으로 취급할 Layer 마스크입니다.
-    ///
-    /// <b>LayerMask 타입으로 두지 않는 이유:</b> UdonSharpBehaviour 의 직렬화 필드 타입은 Udon 타입
-    /// 화이트리스트(NodeRegistry)를 타므로, 검증되지 않은 타입을 올리면 프로젝트 전체 U# 컴파일이
-    /// 막힙니다(TMP_FontAsset 사고와 같은 경로). 그래서 사람이 고르는 LayerMask 는 같은 GameObject 의
-    /// <see cref="ExhibitDescriptorSettings"/> 에 두고, Editor 의 Setup 이 이 int 에 구워 넣습니다.
-    ///
-    /// 기본값은 Default(0) + Environment(11) = 1 + 2048 입니다.
+    /// 아이콘/Panel 이 "벽" 으로 취급할 Layer 마스크. 기본값 Default(0) + Environment(11) = 2049.
+    /// 사람이 고르는 <c>LayerMask</c> 와 Overlay 폰트는 <see cref="ExhibitDescriptorSettings"/> 에
+    /// 있습니다 — 그 타입들은 Udon 화이트리스트에 없어 여기 두면 U# 컴파일이 막힙니다.
     /// </summary>
     [HideInInspector] public int iconProbeLayerMask = 2049;
 
-    // Overlay 폰트 슬롯(TMP_FontAsset)은 이 컴포넌트가 아니라 같은 GameObject 의
-    // ExhibitDescriptorSettings(평범한 MonoBehaviour) 에 있습니다. 여기에 둘 수 없는 이유는
-    // ExhibitDescriptorSettings 의 주석에 적어 두었습니다. (요약: Udon 타입 화이트리스트)
+    // VR 에서 비어 있는 입력 축은 오른손 스틱 상하(InputLookVertical) 하나뿐입니다.
+    // Desktop 에서 같은 축은 마우스 상하 시점이므로 IsUserInVR() 로 가릅니다.
+    // Open Mode 와 무관하게 VR 이면 항상 켭니다.
+    [Header("VR Stick Scroll")]
+    [Tooltip("VR 에서 오른손 스틱 상하로 본문을 스크롤하는 속도(px/초). 0 이면 스틱 스크롤을 끕니다.")]
+    [Min(0f)] [SerializeField] private float stickScrollSpeed = 600f;
+
+    [Tooltip("이 값보다 작은 스틱 입력은 무시합니다. 스틱 중립의 미세한 흔들림을 걸러 냅니다.")]
+    [Range(0f, 0.9f)] [SerializeField] private float stickScrollDeadzone = 0.2f;
+
+    [Tooltip("스틱을 위로 밀면 기본적으로 앞선 본문(위쪽)이 보입니다. 반대로 느껴지면 켜세요.")]
+    [SerializeField] private bool stickScrollInvert = false;
 
     [Header("Debug")]
     [Tooltip("등록/언어전환 로그를 콘솔에 출력합니다. 완성 후에는 꺼두세요.")]
@@ -126,12 +142,22 @@ public class ExhibitManager : UdonSharpBehaviour
     // 커서가 어긋나도 다음 사이클에 다시 훑으므로 문제되지 않습니다.
     private int _scanCursor;
 
-    // 시선 각도의 cos 캐시. Acos 을 매 프레임 부르지 않기 위한 것으로,
-    // 인스펙터 값이 바뀔 때만 다시 계산합니다.
+    // 시선 각도의 cos 캐시. 인스펙터 값이 바뀔 때만 다시 계산합니다.
+    // sin 은 근접 모드의 "Panel(구) × 시야(원뿔)" 교차 판정에만 쓰입니다.
     private float _cosGazeEnter;
     private float _cosGazeExit;
+    private float _sinGazeExit;
     private float _cachedEnterAngle = -1f;
     private float _cachedExitAngle = -1f;
+
+    // 근접 모드로 열려 있는 작품. 동시에 하나만 허용해 먼저 응시한 쪽이 유지되게 합니다.
+    // (아이콘 모드의 다중 Overlay 는 이 제한을 받지 않습니다)
+    private ExhibitInteractable _proximityOwner;
+
+    private bool _vrChecked;
+    private bool _isVR;
+    private float _lookVertical;
+    private ExhibitInteractable _scrollTarget;
 
     // ---------------------------------------------------------------------
     // Unity / Udon Events
@@ -204,10 +230,20 @@ public class ExhibitManager : UdonSharpBehaviour
         Vector3 headPosition = head.position;
         Vector3 headForward = head.rotation * Vector3.forward;
 
+        if (!_vrChecked)
+        {
+            _vrChecked = true;
+            _isVR = player.IsUserInVR();
+        }
+
         _RefreshGazeCos();
         _ScanNear(headPosition);
 
         float deltaTime = Time.deltaTime;
+
+        // 열려 있는 Overlay 중 시선에 가장 가까운 것을 고릅니다. (스틱 스크롤 대상)
+        _scrollTarget = null;
+        float bestDot = -2f;
 
         // 역순 순회: 순회 중 제거되어도 안전합니다.
         for (int i = _nearCount - 1; i >= 0; i--)
@@ -228,8 +264,39 @@ public class ExhibitManager : UdonSharpBehaviour
                 continue;
             }
 
-            exhibit._TickIcon(headPosition, headForward, deltaTime, _cosGazeEnter, _cosGazeExit);
+            exhibit._TickIcon(headPosition, headForward, deltaTime,
+                              _cosGazeEnter, _cosGazeExit, _sinGazeExit);
+
+            if (!_isVR) continue;
+
+            float dot = exhibit._GetOverlayGazeDot(headPosition, headForward);
+            if (dot <= bestDot) continue;
+            bestDot = dot;
+            _scrollTarget = exhibit;
         }
+
+        _TickStickScroll(deltaTime);
+    }
+
+    /// <summary>VR 오른손 스틱 상하로 응시 중인 Overlay 의 본문을 스크롤합니다.</summary>
+    private void _TickStickScroll(float deltaTime)
+    {
+        if (!_isVR) return;
+        if (stickScrollSpeed <= 0f) return;
+        if (!Utilities.IsValid(_scrollTarget)) return;
+
+        float value = _lookVertical;
+        if (value > -stickScrollDeadzone && value < stickScrollDeadzone) return;
+
+        // 스틱을 위로 밀면 앞선 본문이 보입니다 = 스크롤 값이 줄어듭니다.
+        if (!stickScrollInvert) value = -value;
+
+        _scrollTarget._ScrollOverlayBy(value * stickScrollSpeed * deltaTime);
+    }
+
+    public override void InputLookVertical(float value, UdonInputEventArgs args)
+    {
+        _lookVertical = value;
     }
 
     /// <summary>각도 → cos 변환은 설정이 바뀔 때만 합니다. (매 프레임 Cos 호출 회피)</summary>
@@ -245,6 +312,7 @@ public class ExhibitManager : UdonSharpBehaviour
         {
             _cachedExitAngle = gazeExitAngle;
             _cosGazeExit = Mathf.Cos(gazeExitAngle * Mathf.Deg2Rad);
+            _sinGazeExit = Mathf.Sin(gazeExitAngle * Mathf.Deg2Rad);
         }
     }
 
@@ -406,6 +474,33 @@ public class ExhibitManager : UdonSharpBehaviour
         _near = new ExhibitInteractable[8];
         _nearCount = 0;
         _scanCursor = 0;
+    }
+
+    // ---------------------------------------------------------------------
+    // Proximity Open (근접 모드 중재)
+    // ---------------------------------------------------------------------
+
+    /// <summary>이 작품이 지금 근접 모드로 열려도 되는지. 이미 다른 작품이 열려 있으면 false 입니다.</summary>
+    public bool _CanArmProximity(ExhibitInteractable exhibit)
+    {
+        if (!Utilities.IsValid(_proximityOwner)) { _proximityOwner = null; return true; }
+        if (_proximityOwner == exhibit) return true;
+
+        // 소유자가 꺼졌거나 이미 닫혔으면 자리를 넘겨줍니다.
+        if (!_proximityOwner.gameObject.activeInHierarchy) { _proximityOwner = null; return true; }
+        if (!_proximityOwner._IsOverlayOpen()) { _proximityOwner = null; return true; }
+
+        return false;
+    }
+
+    public void _SetProximityOwner(ExhibitInteractable exhibit)
+    {
+        _proximityOwner = exhibit;
+    }
+
+    public void _ClearProximityOwner(ExhibitInteractable exhibit)
+    {
+        if (_proximityOwner == exhibit) _proximityOwner = null;
     }
 
     // ---------------------------------------------------------------------

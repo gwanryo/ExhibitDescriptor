@@ -32,9 +32,14 @@
                                                           (버튼은 본문 밖 열)
 ```
 
+**VR 이라면 가운데 단계를 건너뛸 수 있습니다.** `Open Mode` 를 `Proximity` 로 두면 아이콘 없이
+**응시한 채 다가가는 것만으로** 설명이 펼쳐지고, 시선이나 거리를 벗어나면 저절로 접힙니다.
+14cm 짜리 아이콘을 손 레이로 겨눌 일이 사라집니다. 기본값은 `Icon` 이라 기존 월드는 그대로입니다.
+
 |  | |
 |---|---|
 | 🎯 **감상을 방해하지 않음** | 작품 정면에 Interact 판정이 없습니다. 툴팁도 하이라이트도 뜨지 않습니다 |
+| 🥽 **VR 에서 조준이 필요 없음** | `Proximity` 모드는 응시한 채 다가가면 저절로 열립니다. 본문은 오른손 스틱으로 스크롤 |
 | 🧭 **배치 자동 결정** | 아이콘·판넬의 좌우 부호와 글자 방향을 매 프레임 플레이어 머리 위치로 계산 |
 | 🧱 **벽에 잠기지 않음** | 앞뒤로 Raycast 해 빈 구간을 재고, 기울어진 만큼만 관람자 쪽으로 빼냄 |
 | 🌏 **KR / EN / JP** | 비워 둔 언어는 KR 로 자동 fallback. 전환 버튼 라벨은 항상 동기화 |
@@ -136,7 +141,7 @@ Tools > Exhibit Descriptor > Exhibit Descriptor
 
 | 구역 | 하는 일 |
 |---|---|
-| **① 전시 준비** | Scene 마다 한 블록. `Overlay 폰트` · `벽 판정 Layer` · `기본 언어` — **안 채우면 반드시 막히는 값 셋** |
+| **① 전시 준비** | Scene 마다 한 블록. `Overlay 폰트` · `벽 판정 Layer` · `기본 언어` · `열림 방식` |
 | **② 작품** | 선택한 Mesh 를 작품으로 · 빈 작품 1개 · Setup(선택/씬 전체) · `저장할 때 자동 Setup` 체크 |
 | **③ 점검** | `검사` 를 누르면 오류·경고를 **같은 문제끼리 접어서** 보여 줍니다. 줄의 `선택` 을 누르면 그 오브젝트가 Hierarchy 에서 잡힙니다 |
 
@@ -220,8 +225,15 @@ Tools > Exhibit Descriptor > Exhibit Descriptor
 | 필드 | 기본값 | 설명 |
 |---|---|---|
 | `Default Language` | `KR` | 시작 언어 |
+| `Default Open Mode` | `Icon` | `Icon` = ⓘ 를 Interact / `Proximity` = 응시+거리로 자동 |
+| `Proximity Open Delay` | `0.5` s | 이만큼 계속 응시해야 열림. 0 이면 즉시 |
+| `Proximity Close Cooldown` | `0.3` s | 저절로 닫힌 뒤 이 시간 동안은 다시 안 열림 |
+| `Proximity Exit Range Scale` | `1.25` | 닫힘 거리 = `Gaze Distance` × 이 값 |
+| `Stick Scroll Speed` | `600` px/s | VR 오른손 스틱 스크롤 속도. 0 이면 끔 |
+| `Stick Scroll Deadzone` | `0.2` | 이보다 작은 스틱 입력은 무시 |
+| `Stick Scroll Invert` | `false` | 스틱 상하 방향이 반대로 느껴지면 켜기 |
 | `Default Interaction Text` | `설명` / `Description` / `説明` | 작품이 비워 두면 이 값 |
-| `Default Proximity` | `2` m | Interact 가능 거리 |
+| `Default Proximity` | `2` m | Interact 가능 거리 (`Icon` 모드에서만 쓰임) |
 | `Default Icon Placement` | `Right` | 관람자 기준 Right / Left / Above / Below |
 | `Default Icon Gap` | `0.15` m | 작품 가장자리와 아이콘 사이 |
 | `Default Icon Size` | `0.08` m | 아이콘 한 변 |
@@ -243,6 +255,7 @@ Tools > Exhibit Descriptor > Exhibit Descriptor
 **표시 토글** — `Show Title` / `Subtitle` / `Description` / `Extra Info`
 
 **개별 오버라이드** — `Icon Placement` 를 `Default` 가 아닌 값으로 두면 그 작품만 다른 쪽에 붙습니다.
+`Open Mode` 도 같은 규칙이라 작품 하나만 근접 자동으로 둘 수 있습니다.
 `Override Icon Settings` 를 켜면 gap · height offset · size · gaze distance 를 작품 단위로 잡습니다.
 
 > [!IMPORTANT]
@@ -276,6 +289,41 @@ TMP 기본 폰트(`LiberationSans SDF`)에는 한글·일본어 글리프가 없
 
 ---
 
+## 🎚️ 열림 방식
+
+**`Tools > Exhibit Descriptor` 창의 `① 전시 준비 > 열림 방식`** 에서 전시 전체를 한 번에 정합니다.
+작품마다 다르게 두려면 `ExhibitInteractable` 의 `Open Mode` 를 `Default` 가 아닌 값으로 바꾸세요.
+
+| | `Icon` (기본) | `Proximity` |
+|---|---|---|
+| 여는 법 | ⓘ 아이콘을 Interact | 응시한 채 `Gaze Distance` 안으로 들어가면 자동 |
+| 닫는 법 | `×` 버튼 | 시선/거리를 벗어나면 자동 (`×` 도 그대로 동작) |
+| ⓘ 아이콘 | 응시하면 뜸 | **한 번도 뜨지 않음** (Collider 도 없음) |
+| 동시 열림 | 여러 개 가능 | 하나만 — 먼저 응시한 쪽이 유지됨 |
+| VR 조준 | 필요 | 불필요 |
+
+#### 다가가서 읽어도 닫히지 않습니다
+
+Panel 은 작품 옆에 서므로, 가까이서 읽으면 작품 중심은 시야에서 크게 벗어납니다. 폭 2m 짜리
+그림을 1m 거리에서 읽으면 작품 중심은 **56°** 로 밀려나 `Gaze Exit Angle`(45°) 밖입니다.
+
+그래서 **여는 판정과 유지하는 판정의 대상이 다릅니다.** 열 때는 작품 중심을 보고, 유지할 때는
+**Panel 을 봅니다.** Panel 은 점이 아니라 크기를 가진 대상으로 재기 때문에 가까이 갈수록 판정이
+저절로 넓어집니다 (1.5m 에서 15.5°, 1.0m 에서 22.5°). 맞출 값은 없습니다.
+
+#### `×` 는 "그만 볼래" 라는 뜻이 됩니다
+
+근접 모드에서 `×` 로 닫으면, **시선이 그 작품을 한 번 벗어나기 전까지** 다시 열리지 않습니다.
+그냥 닫기만 하면 여전히 보고 있으므로 곧바로 다시 열릴 텐데, 그게 아니라 잠깁니다.
+
+#### VR 스크롤
+
+VR 이면 **오른손 스틱 상하**로 응시 중인 Panel 의 본문이 스크롤됩니다. VRChat VR 에서 이 축이
+비어 있어 쓸 수 있습니다. Desktop 은 같은 축이 마우스 시점이라 동작하지 않고, `▲/▼` 버튼을
+그대로 씁니다. 이 기능은 열림 방식과 무관하게 VR 이면 항상 켜집니다.
+
+---
+
 ## 🌐 언어 전환
 
 **월드 버튼** — `ExhibitLanguageSwitch` 를 붙인 오브젝트(Collider 필요)를 배치.
@@ -305,6 +353,11 @@ manager._CycleLanguage();
 | 버튼이 안 눌린다 | 버튼 Layer 가 `UI` → **`Default`** 로 |
 | 입장하자마자 Overlay 가 다 켜져 있다 | `Overlay` 오브젝트가 활성 상태로 저장됨 → 체크 해제 |
 | 아이콘이 벽에 파묻힌다 | 벽감이 너무 좁음 → `Icon Placement` 를 반대쪽/`Above` 로 (Validate 가 미리 경고) |
+| VR 에서 ⓘ 를 못 누르겠다 | 열림 방식을 **`Proximity`** 로 — 아이콘 없이 다가가면 열립니다 |
+| 근접 모드인데 아이콘이 안 뜬다 | **정상입니다.** 그 모드는 아이콘을 쓰지 않습니다 |
+| 근접 모드에서 옆 작품이 자꾸 열린다 | `Gaze Distance` 가 작품 간격보다 큼 → 줄이세요 (Validate 가 경고) |
+| 근접 모드에서 걸어 다니면 판넬이 깜빡인다 | `Proximity Open Delay` 를 올리세요 (기본 0.5초) |
+| VR 스틱으로 스크롤이 안 된다 | Desktop 에서는 동작하지 않습니다 · `Stick Scroll Speed` 가 0 인지 확인 |
 | Tools 메뉴가 없다 | UdonSharp 컴파일 에러 → Console 확인 |
 | Prefab 복제 후 Manager 참조가 비어 있음 | 정상 — Scene 참조는 Prefab 에 저장 안 됨. Setup 실행 |
 | 빌드 시 Udon serialization 에러 | `VRChat SDK > Utilities > Reserialize All Udon Assets` |

@@ -93,17 +93,9 @@ public class ExhibitLanguageSwitch : UdonSharpBehaviour
     }
 
     /// <summary>
-    /// ExhibitManager 를 찾아 연결합니다.
-    ///  1) 자기 Hierarchy Root 안을 먼저 찾습니다. Transform Root 는 항상 같은 Scene 이므로
-    ///     Additive Scene 에서도 안전합니다.
-    ///  2) 못 찾으면 이름으로 찾습니다. (GameObject.Find)
-    ///
-    /// Udon 은 UnityEngine.SceneManagement.Scene 타입을 노출하지 않으므로
-    /// (GameObject.scene / Scene.GetRootGameObjects 모두 사용 불가)
-    /// 2) 가 찾은 오브젝트가 같은 Scene 인지 런타임에서 확인할 수 없습니다.
-    /// Additive Scene 구성이라면 Tools > Exhibit Descriptor > Setup > All Exhibits In Scene 으로
-    /// manager 를 미리 연결하세요. (Editor 도구는 같은 Scene 의 Manager 만 연결합니다.)
-    /// 자세한 내용은 ExhibitInteractable._EnsureManager() 의 주석을 참고하세요.
+    /// ExhibitManager 를 찾아 연결합니다. Hierarchy Root 안 → 이름 순.
+    /// 이름 검색은 Scene 을 가릴 수 없습니다 — 자세한 이유는
+    /// <c>ExhibitInteractable._EnsureManager()</c> 의 주석을 보세요.
     /// </summary>
     private void _EnsureManager()
     {

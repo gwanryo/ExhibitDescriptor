@@ -12,10 +12,8 @@ using UnityEditor;
 /// 창이 값을 따로 들고 있으면 Inspector 와 어긋나고 <c>Ctrl+Z</c> 가 깨지므로, 값의 원본은 언제나
 /// Scene 의 <see cref="ExhibitManager"/> / <see cref="ExhibitDescriptorSettings"/> 입니다.
 ///
-/// 창이 존재하는 이유는 세 가지 실패를 없애는 것입니다.
-///   1. 폰트를 지정해도 Setup 을 잊어 한글이 계속 □ 로 보이는 것 — 창이 그 자리에서 반영합니다
-///   2. 벽 판정 레이어를 어디서 고치는지 몰라 Manager Inspector 를 헤매는 것
-///   3. 작품 100개 씬에서 Validate 결과가 콘솔에 흩어져 범인을 못 찾는 것 — 같은 문제를 접어서 보여 줍니다
+/// 창이 없애려는 실패는 둘입니다 — 폰트·레이어를 지정하고 Setup 을 잊어 한글이 □ 로 남는 것,
+/// 그리고 작품 100개 씬에서 Validate 결과가 콘솔에 흩어져 범인을 못 찾는 것.
 /// </summary>
 public class ExhibitDescriptorWindow : EditorWindow
 {
@@ -257,6 +255,30 @@ public class ExhibitDescriptorWindow : EditorWindow
 
             applyNote = "기본 언어를 " + languageProperty.enumDisplayNames[languageProperty.enumValueIndex] +
                         " 로 바꿨습니다.";
+        }
+
+        // --- 열림 방식 ---
+        SerializedProperty openModeProperty = managerSo.FindProperty("defaultOpenMode");
+
+        EditorGUI.BeginChangeCheck();
+        EditorGUILayout.PropertyField(openModeProperty, new GUIContent("열림 방식"));
+
+        if (EditorGUI.EndChangeCheck())
+        {
+            managerSo.ApplyModifiedProperties();
+            EditorUtility.SetDirty(manager);
+            ExhibitDescriptorTools.TryCopyProxyToUdon(manager);
+            MarkDirty(scene);
+
+            applyNote = "열림 방식을 " + openModeProperty.enumDisplayNames[openModeProperty.enumValueIndex] +
+                        " 로 바꿨습니다.";
+        }
+
+        if (openModeProperty.enumValueIndex == 2)   // Proximity
+        {
+            EditorGUILayout.HelpBox("작품을 응시한 채로 Gaze Distance 안에 들어가면 설명이 저절로 " +
+                                    "열립니다. ⓘ 아이콘은 뜨지 않습니다. 작품별로 다르게 두려면 각 " +
+                                    "ExhibitInteractable 의 Open Mode 를 바꾸세요.", MessageType.Info);
         }
 
         EditorGUILayout.BeginHorizontal();

@@ -296,6 +296,14 @@ public class ExhibitOverlay : UdonSharpBehaviour
         _SetTargetScroll(0f);
     }
 
+    /// <summary>연속 스크롤(px). VR 스틱 입력이 매 프레임 밀어 넣습니다.</summary>
+    public void _ScrollBy(float delta)
+    {
+        if (delta == 0f) return;
+        _EnsureInit();
+        _SetTargetScroll(_targetScroll + delta);
+    }
+
     private void _SetTargetScroll(float value)
     {
         float max = _MaxScroll();

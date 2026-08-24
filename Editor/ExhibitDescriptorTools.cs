@@ -700,14 +700,10 @@ public static partial class ExhibitDescriptorTools
     /// <summary>
     /// <c>UdonSharpEditorUtility.CopyProxyToUdon</c> 을 안전하게 호출합니다.
     ///
-    /// UdonSharp 의 가드는 <c>ScriptVersion</c> / <c>CompiledVersion</c> 만 봅니다
-    /// (<c>UdonSharpEditorUtility.cs:1162-1166</c>). 그런데 실제로 힙 쓰기에 쓰이는 것은
-    /// <c>fieldDefinitions</c> 이고, 이것은 <b>컴파일러만</b> 채웁니다
-    /// (<c>UdonSharpCompilerV1.cs:790-805</c>). 그래서 "미컴파일인데 버전만 최신" 인 program asset
-    /// 에서는 세 가드를 모두 통과한 뒤 <c>fieldDefinitions.Values</c> 에서 NullReferenceException 이
-    /// 납니다 (<c>UdonVariableStorageInterface.cs:114</c>).
-    ///
-    /// 여기서 미리 걸러 내면 그 NRE 가 Setup 루프를 통째로 중단시키는 일이 없습니다.
+    /// UdonSharp 의 가드는 <c>ScriptVersion</c> / <c>CompiledVersion</c> 만 보는데, 힙 쓰기에 실제로
+    /// 쓰이는 <c>fieldDefinitions</c> 는 컴파일러만 채웁니다. "미컴파일인데 버전만 최신" 인 program
+    /// asset 은 가드를 통과한 뒤 <c>fieldDefinitions.Values</c> 에서 NRE 를 냅니다. 미리 걸러 내면
+    /// 그 NRE 가 Setup 루프를 통째로 중단시키지 않습니다.
     /// </summary>
     /// <returns>실제로 동기화했으면 true.</returns>
     internal static bool TryCopyProxyToUdon(UdonSharpBehaviour proxy)
@@ -1082,17 +1078,13 @@ public static partial class ExhibitDescriptorTools
     /// <summary>
     /// manager 필드를 같은 Scene 의 Manager 로 맞춥니다.
     ///
-    /// 오브젝트를 다른 Scene 으로 복사/이동하면 예전 Scene 의 Manager 참조가 그대로 남습니다.
-    /// 그 Scene 이 언로드되면 참조가 죽어 언어 전환과 Overlay 틱이 함께 멈추므로,
-    /// 비어 있을 때뿐 아니라 <b>다른 Scene 을 가리킬 때도</b> 교체합니다.
+    /// 오브젝트를 다른 Scene 으로 옮기면 예전 Scene 의 참조가 남고, 그 Scene 이 언로드되면 언어
+    /// 전환과 Overlay 틱이 함께 멈춥니다. 그래서 비어 있을 때뿐 아니라 <b>다른 Scene 을 가리킬
+    /// 때도</b> 교체하고, 같은 Scene 에 Manager 가 없으면 잘못된 참조를 남기지 않고 비웁니다.
+    /// (Prefab Asset / 편집 모드처럼 Scene 밖의 오브젝트는 대상이 없으므로 건드리지 않습니다)
     ///
-    /// 같은 Scene 에 Manager 가 없으면 잘못된 참조를 남기지 않고 비웁니다.
-    /// (런타임 _EnsureManager 가 다시 찾을 수 있고, Validate 도 "누락" 으로 잡아 줍니다)
-    /// 단, Prefab Asset / Prefab 편집 모드처럼 열려 있는 Scene 밖의 오브젝트는
-    /// 대신 연결할 Manager 자체가 없으므로 건드리지 않습니다.
-    ///
-    /// 쓰기는 <paramref name="so"/> 를 통해서만 하므로 Undo / Prefab override 기록 /
-    /// Udon proxy 동기화 경로가 그대로 유지됩니다.
+    /// 쓰기는 <paramref name="so"/> 를 통해서만 하므로 Undo / Prefab override / Udon proxy 동기화
+    /// 경로가 그대로 유지됩니다.
     /// </summary>
     private static void AssignManagerProperty(SerializedObject so, Component context, ExhibitManager manager, string label)
     {
@@ -1290,15 +1282,7 @@ public static partial class ExhibitDescriptorTools
 
     /// <summary>
     /// <paramref name="root"/> 아래의 모든 TMP 텍스트에 폰트를 적용합니다.
-    ///
-    /// 폰트를 패키지에 동봉하지 않고 <see cref="ExhibitDescriptorSettings.overlayFont"/> 슬롯으로 받는 이유
-    ///  - CJK 글리프를 담은 폰트는 재배포 조건이 폰트마다 다릅니다. 패키지가 임의로 품으면
-    ///    이 패키지를 쓰는 월드까지 그 라이선스를 따라가게 됩니다. 그래서 폰트 선택은
-    ///    프로젝트에 맡기고, 도구는 "지정한 폰트를 빠짐없이 꽂아 주는" 일만 합니다.
-    ///  - 폰트를 지정하지 않으면 TMP 기본값(LiberationSans SDF)이 쓰이는데 한글/일본어 글리프가
-    ///    없어 전부 □ 로 보입니다. 이 상태는 <see cref="ValidateScene"/> 이 경고합니다.
-    ///
-    /// 언어 전환 버튼 라벨도 대상입니다. "한국어" / "日本語" 를 표시하므로 같은 문제가 납니다.
+    /// 언어 전환 버튼 라벨("한국어" / "日本語")도 대상입니다 — 같은 글리프 문제가 납니다.
     /// </summary>
     private static void ApplyOverlayFont(Component root, TMP_FontAsset font)
     {

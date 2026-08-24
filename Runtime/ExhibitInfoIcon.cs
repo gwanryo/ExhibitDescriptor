@@ -5,15 +5,12 @@ using VRC.SDKBase;
 /// <summary>
 /// 작품 옆에 뜨는 ⓘ 아이콘. World Space Canvas + BoxCollider 와 같은 GameObject 에 붙습니다.
 ///
-/// 이 컴포넌트는 <b>판정과 표시만</b> 담당하는 얇은 릴레이입니다. 위치/회전/페이드는
-/// <see cref="ExhibitInteractable"/> 이 계산해서 밀어 넣습니다. (Update() 없음)
+/// 판정과 표시만 하는 얇은 릴레이입니다. 위치/회전/페이드는 <see cref="ExhibitInteractable"/> 이
+/// 계산해서 밀어 넣습니다. (Update() 없음)
 ///
-/// 아이콘이 꺼져 있는 동안에는 이 GameObject 가 <c>SetActive(false)</c> 이므로
-/// Collider 도 함께 죽습니다. 즉 Interact 대상이 <b>물리적으로 존재하지 않습니다</b> -
-/// "툴팁이 안 뜬다" 가 아니라 뜰 수가 없습니다. 감상 중 화면 중앙이 깨끗한 이유입니다.
-///
-/// Interact 는 Collider 와 UdonBehaviour 가 같은 GameObject 일 때 가장 안전하므로
-/// (자식 Collider 는 SDK 버전에 따라 인식되지 않을 수 있습니다) 아이콘에 직접 붙입니다.
+/// 꺼져 있는 동안에는 GameObject 가 비활성이라 Collider 도 함께 죽습니다 — Interact 대상이 아예
+/// 존재하지 않으므로 감상 중 화면 중앙이 깨끗합니다. Collider 와 UdonBehaviour 를 같은
+/// GameObject 에 두는 이유는 자식 Collider 가 SDK 버전에 따라 인식되지 않기 때문입니다.
 /// </summary>
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class ExhibitInfoIcon : UdonSharpBehaviour
@@ -39,11 +36,8 @@ public class ExhibitInfoIcon : UdonSharpBehaviour
     }
 
     /// <summary>
-    /// 현재 언어의 Interact 문구를 반영합니다.
-    ///
-    /// 비활성 오브젝트에는 이벤트가 전달되지 않으므로, 아이콘이 켜지는 순간
-    /// <see cref="ExhibitInteractable"/> 이 다시 한 번 호출해 줍니다.
-    /// (에디터 Setup 이 UdonBehaviour 에 구워 둔 값이 그 사이의 기본값입니다)
+    /// 현재 언어의 Interact 문구를 반영합니다. 비활성 오브젝트에는 이벤트가 전달되지 않으므로
+    /// 아이콘이 켜지는 순간 <see cref="ExhibitInteractable"/> 이 다시 한 번 호출해 줍니다.
     /// </summary>
     public void _SetInteractText(string text)
     {

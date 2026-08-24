@@ -1,9 +1,9 @@
 {
   "name": "com.gwanryo.exhibit-descriptor",
   "displayName": "Exhibit Descriptor",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "unity": "2022.3",
-  "description": "작품을 응시하면 옆에 ⓘ 아이콘이 뜨고 그것을 클릭하면 KR/EN/JP 설명 Overlay 가 펼쳐지는 VRChat 전시 시스템입니다. 아이콘 위치와 방향은 런타임에 플레이어 위치로 계산하므로 작품마다 손으로 맞출 필요가 없습니다. 선택한 Mesh 일괄 변환, 참조 자동 연결(Setup), 1.x 구성 마이그레이션, Scene 구성 검증(Validate) 도구를 포함합니다.",
+  "description": "작품을 응시하면 KR/EN/JP 설명이 그 자리에서 펼쳐지는 VRChat 전시 시스템입니다. 아이콘과 판넬의 위치·방향은 런타임이 정하고, VR 에서는 조준 없이 다가가기만 해도 열리는 근접 모드를 쓸 수 있습니다.",
   "author": {
     "name": "Ryo",
     "url": "https://github.com/gwanryo"

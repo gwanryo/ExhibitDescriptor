@@ -79,6 +79,8 @@ public static partial class ExhibitDescriptorTools
     private const string CodeFontMissingKR = "font.missingKR";
     private const string CodeFontMissingJP = "font.missingJP";
     private const string CodeFontMissingSymbol = "font.missingSymbol";
+    private const string CodeProximityRangeOverlap = "proximity.rangeOverlap";
+    private const string CodeProximityUnusedInteract = "proximity.unusedInteract";
 
     /// <summary>도구가 권하는 Setup 메뉴의 경로. 문구를 한 곳에서 고치기 위해 상수로 둡니다.</summary>
     private const string SetupAllMenuHint = "Tools > Exhibit Descriptor > Setup > All Exhibits In Scene";
@@ -151,6 +153,7 @@ public static partial class ExhibitDescriptorTools
         CollectManagerFindings(findings, exhibits);
 
         for (int i = 0; i < exhibits.Length; i++) CollectExhibitFindings(findings, exhibits[i]);
+        CollectProximityFindings(findings, exhibits);
         for (int i = 0; i < overlays.Length; i++) CollectOverlayFindings(findings, overlays[i]);
         for (int i = 0; i < buttons.Length; i++) CollectButtonFindings(findings, buttons[i]);
         for (int i = 0; i < switches.Length; i++) CollectLanguageSwitchFindings(findings, switches[i]);
@@ -436,6 +439,106 @@ public static partial class ExhibitDescriptorTools
                        "Interact 레이가 여기에 먼저 막히면 아이콘을 클릭할 수 없습니다.",
                        stray);
         }
+    }
+
+    /// <summary>
+    /// 근접 모드 작품끼리 열림 범위가 겹치면 옆 작품이 자꾸 자리를 뺏습니다. 저작 시점에 알립니다.
+    /// (런타임은 동시에 하나만 열지만, 어느 쪽이 열릴지가 시선 각도에 따라 흔들립니다)
+    /// </summary>
+    private static void CollectProximityFindings(List<ExhibitFinding> findings, ExhibitInteractable[] exhibits)
+    {
+        List<ExhibitInteractable> proximity = new List<ExhibitInteractable>();
+        for (int i = 0; i < exhibits.Length; i++)
+        {
+            if (ResolveOpenMode(exhibits[i]) == ExhibitOpenMode.Proximity) proximity.Add(exhibits[i]);
+        }
+
+        for (int i = 0; i < proximity.Count; i++)
+        {
+            ExhibitInteractable exhibit = proximity[i];
+            string path = GetPath(exhibit.transform);
+            SerializedObject so = new SerializedObject(exhibit);
+
+            float range = ResolveGazeDistance(so);
+            Vector3 center = exhibit.transform.TransformPoint(GetBoundsCenter(so));
+
+            float nearestSq = -1f;
+            for (int j = 0; j < proximity.Count; j++)
+            {
+                if (j == i) continue;
+                ExhibitInteractable other = proximity[j];
+                SerializedObject otherSo = new SerializedObject(other);
+                Vector3 otherCenter = other.transform.TransformPoint(GetBoundsCenter(otherSo));
+
+                float distanceSq = (center - otherCenter).sqrMagnitude;
+                if (nearestSq < 0f || distanceSq < nearestSq) nearestSq = distanceSq;
+            }
+
+            float nearest = nearestSq < 0f ? 0f : Mathf.Sqrt(nearestSq);
+
+            if (nearestSq >= 0f && nearest < range)
+            {
+                AddWarning(findings, CodeProximityRangeOverlap,
+                           "근접 모드의 열림 범위가 옆 작품과 겹칩니다.",
+                           path + " (Gaze Distance " + range.ToString("0.##") + "m > 이웃까지 " +
+                           nearest.ToString("0.##") + "m)",
+                           "Gaze Distance 를 이웃 간격보다 작게 줄이세요.",
+                           exhibit);
+            }
+
+            // 근접 모드는 아이콘을 Interact 하지 않으므로 이 값이 아무 일도 하지 않습니다.
+            SerializedProperty proximityProperty = so.FindProperty("interactionProximity");
+            if (proximityProperty != null && proximityProperty.floatValue != 2f)
+            {
+                AddWarning(findings, CodeProximityUnusedInteract,
+                           "근접 모드라 Interaction Proximity 가 쓰이지 않습니다.",
+                           path,
+                           "아이콘을 Interact 하지 않는 모드입니다. 거리는 Gaze Distance 가 정합니다.",
+                           exhibit);
+            }
+        }
+    }
+
+    /// <summary>작품의 실제 열림 방식. Default 면 연결된 Manager 의 기본값을 따릅니다.</summary>
+    private static ExhibitOpenMode ResolveOpenMode(ExhibitInteractable exhibit)
+    {
+        SerializedObject so = new SerializedObject(exhibit);
+
+        SerializedProperty modeProperty = so.FindProperty("openMode");
+        if (modeProperty == null) return ExhibitOpenMode.Icon;
+
+        ExhibitOpenMode mode = (ExhibitOpenMode)modeProperty.enumValueIndex;
+        if (mode != ExhibitOpenMode.Default) return mode;
+
+        ExhibitManager manager = GetObject(so, "manager") as ExhibitManager;
+        if (manager == null) return ExhibitOpenMode.Icon;
+
+        SerializedProperty defaultProperty = new SerializedObject(manager).FindProperty("defaultOpenMode");
+        if (defaultProperty == null) return ExhibitOpenMode.Icon;
+
+        ExhibitOpenMode resolved = (ExhibitOpenMode)defaultProperty.enumValueIndex;
+        return resolved == ExhibitOpenMode.Default ? ExhibitOpenMode.Icon : resolved;
+    }
+
+    private static Vector3 GetBoundsCenter(SerializedObject so)
+    {
+        SerializedProperty property = so.FindProperty("boundsCenterLocal");
+        return property != null ? property.vector3Value : Vector3.zero;
+    }
+
+    private static float ResolveGazeDistance(SerializedObject so)
+    {
+        SerializedProperty overrideProperty = so.FindProperty("overrideIconSettings");
+        SerializedProperty gazeProperty = so.FindProperty("gazeDistance");
+        float own = gazeProperty != null ? gazeProperty.floatValue : 6f;
+
+        if (overrideProperty != null && overrideProperty.boolValue) return own;
+
+        ExhibitManager manager = GetObject(so, "manager") as ExhibitManager;
+        if (manager == null) return own;
+
+        SerializedProperty defaultProperty = new SerializedObject(manager).FindProperty("defaultGazeDistance");
+        return defaultProperty != null ? defaultProperty.floatValue : own;
     }
 
     private static void CollectIconFindings(List<ExhibitFinding> findings, ExhibitInteractable exhibit,

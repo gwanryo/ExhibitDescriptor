@@ -98,6 +98,10 @@ public class ExhibitInteractable : UdonSharpBehaviour
     [Tooltip("아이콘이 작품의 어느 쪽에 붙을지. Default 면 ExhibitManager 의 값을 따릅니다.")]
     [SerializeField] private ExhibitIconPlacement iconPlacement = ExhibitIconPlacement.Default;
 
+    [Tooltip("설명을 여는 방식. Default 면 ExhibitManager 의 Default Open Mode 를 따릅니다. " +
+             "Proximity 로 두면 아이콘 대신 응시+거리로 저절로 열립니다. (아이콘은 뜨지 않습니다)")]
+    [SerializeField] private ExhibitOpenMode openMode = ExhibitOpenMode.Default;
+
     [Tooltip("체크하면 아래 네 값을 이 작품만 따로 사용합니다. 끄면 ExhibitManager 기본값을 따릅니다.\n" +
              "iconHeightOffset 은 음수가 정당한 값이라 '-1 = 기본값' 같은 sentinel 을 쓸 수 없어 " +
              "bool 하나로 네 값을 함께 게이트합니다.")]
@@ -122,12 +126,8 @@ public class ExhibitInteractable : UdonSharpBehaviour
     // ---------------------------------------------------------------------
     // 에디터가 굽는 기하 정보 (사람이 고칠 값이 아니므로 Inspector 에서 숨깁니다)
     //
-    // Setup 이 실행될 때마다 무조건 덮어씁니다. 굽는 것이 배치 "결과" 가 아니라 "기하" 라서
-    // 사용자의 수동 보정을 보존할 이유가 없고, 그래서 작품 Mesh 를 교체·이동·스케일해도
-    // 아이콘이 자동으로 따라갑니다.
-    //
-    // iconSize 만 에디터가 함께 굽는 값입니다(아이콘 Scale/Collider). 나머지 아이콘 설정은
-    // 어차피 매 프레임 위치 계산에 쓰이므로 런타임이 Manager fallback 과 함께 해석합니다.
+    // Setup 마다 무조건 덮어씁니다. 굽는 것이 배치 "결과" 가 아니라 "기하" 라서 수동 보정을
+    // 보존할 이유가 없고, 그래서 Mesh 를 교체·이동·스케일해도 아이콘이 따라갑니다.
     // ---------------------------------------------------------------------
 
     [HideInInspector] [SerializeField] private Vector3 boundsCenterLocal;
@@ -142,6 +142,11 @@ public class ExhibitInteractable : UdonSharpBehaviour
 
     private bool _started;
     private bool _warnedNoManager;
+
+    // 근접 모드 상태. 음수인 _gazeTimer 는 닫힌 직후의 쿨다운입니다.
+    private float _gazeTimer;
+    private bool _proximityOpen;
+    private bool _proximityLatched;
 
     // 아이콘 상태 (ExhibitManager 의 단일 Update 가 매 프레임 갱신합니다)
     private float _iconAlpha;
@@ -209,6 +214,8 @@ public class ExhibitInteractable : UdonSharpBehaviour
 
     void OnDisable()
     {
+        _ReleaseProximity();
+
         if (Utilities.IsValid(manager))
         {
             manager._UnregisterExhibit(this);
@@ -260,11 +267,9 @@ public class ExhibitInteractable : UdonSharpBehaviour
     // ---------------------------------------------------------------------
 
     /// <summary>
-    /// 이 작품이 응시형 아이콘 방식인지. <b>신규/레거시 판별 기준은 이것 하나뿐입니다.</b>
-    /// (모드 플래그를 따로 두지 않습니다 - Hierarchy 만 봐도 어느 방식인지 알 수 있습니다)
-    ///
-    /// 기하 값이 0 이면 아직 Setup 을 돌리지 않은 것이므로 아이콘 로직을 건너뜁니다.
-    /// 그래야 아이콘을 손으로 붙여만 둔 중간 상태에서 아이콘이 작품 중심에 박히지 않습니다.
+    /// 아이콘 자리 계산이 가능한 작품인지. 신규/레거시 판별 기준은 이것 하나뿐입니다.
+    /// 기하가 0 이면 Setup 전이므로 건너뜁니다 — 아이콘을 손으로 붙여만 둔 중간 상태에서
+    /// 아이콘이 작품 중심에 박히지 않게 합니다.
     /// </summary>
     public bool _HasInfoIcon()
     {
@@ -310,34 +315,67 @@ public class ExhibitInteractable : UdonSharpBehaviour
         return (int)resolved;
     }
 
+    /// <summary>설명을 여는 방식을 int 로 돌려줍니다. (Default 면 Manager 값으로 치환)</summary>
+    public int _GetOpenModeIndex()
+    {
+        ExhibitOpenMode resolved = openMode;
+
+        if (resolved == ExhibitOpenMode.Default)
+        {
+            resolved = Utilities.IsValid(manager) ? manager.defaultOpenMode : ExhibitOpenMode.Icon;
+        }
+
+        if (resolved == ExhibitOpenMode.Default) resolved = ExhibitOpenMode.Icon;
+
+        return (int)resolved;
+    }
+
     /// <summary>
-    /// ExhibitManager 의 단일 Update 가 <b>응시 후보(_near)</b> 에 든 작품에만 매 프레임 호출합니다.
+    /// 열려 있는 Overlay 가 시선축과 이루는 dot 값. 열려 있지 않으면 -2 입니다.
+    /// Manager 가 스틱 스크롤 대상을 고를 때만 씁니다.
+    /// </summary>
+    public float _GetOverlayGazeDot(Vector3 headPosition, Vector3 headForward)
+    {
+        if (!_IsOverlayOpen()) return -2f;
+
+        Vector3 toPanel = overlay.transform.position - headPosition;
+        float distance = toPanel.magnitude;
+        if (distance < 0.0001f) return 1f;
+
+        return Vector3.Dot(toPanel / distance, headForward);
+    }
+
+    /// <summary>VR 스틱 스크롤. Manager 가 응시 중인 Overlay 에만 호출합니다.</summary>
+    public void _ScrollOverlayBy(float delta)
+    {
+        if (!_IsOverlayOpen()) return;
+        overlay._ScrollBy(delta);
+    }
+
+    /// <summary>
+    /// ExhibitManager 의 단일 Update 가 응시 후보(_near)에 든 작품에만 매 프레임 호출합니다.
     ///
     /// <b>이 함수가 이 설계의 핵심입니다.</b> 에디터는 기하(중심 / extents / 얇은 축)만 굽고,
-    /// 배치의 부호(+/-)는 여기서 플레이어 머리 위치로 정합니다.
+    /// 배치의 부호는 여기서 플레이어 머리 위치로 정합니다:
+    /// <c>side = sign(dot(head - center, thinAxisWorld))</c>. 시선 판정에 어차피 머리를 읽으므로
+    /// 공짜이고, 좌대 위 조각처럼 사방에서 보는 작품은 관람자를 따라 아이콘이 옮겨 다닙니다.
     ///
-    ///   side = sign( dot(head - center, thinAxisWorld) )
-    ///
-    /// 시선 판정을 위해 어차피 머리 위치를 읽으므로 이 값은 공짜입니다. 벽에 걸린 액자는
-    /// 플레이어가 뒤에 설 수 없으니 항상 정답이고, 좌대 위 조각처럼 사방에서 보는 작품은
-    /// 관람자를 따라 아이콘이 옮겨 다닙니다.
-    ///
-    /// 이 결정 하나로 1.0.x 의 다음이 전부 사라졌습니다: 에디터의 정면 부호 추측
-    /// (<c>GetFrontNormalAxis</c> 의 "+ 를 정면으로 봄"), 캔버스 반전 규약
-    /// (<c>GetOverlayRotation</c>), <c>OverlayAnchor</c> 수동 180도 보정.
-    ///
-    /// <b>고개를 돌려도 아이콘은 움직이지 않습니다.</b> dir 을 머리 forward 가 아니라
-    /// <i>작품 → 플레이어</i> 방향에서 뽑기 때문입니다. 제자리에서 고개만 돌릴 때는 반응하지 않고,
-    /// 실제로 걸어서 이동해야 옆으로 옮겨 갑니다.
+    /// dir 을 머리 forward 가 아니라 <i>작품 → 플레이어</i> 에서 뽑으므로, 제자리에서 고개만
+    /// 돌릴 때는 아이콘이 움직이지 않고 실제로 걸어야 옆으로 옮겨 갑니다.
     /// </summary>
     public void _TickIcon(Vector3 headPosition, Vector3 headForward, float deltaTime,
-                          float cosEnter, float cosExit)
+                          float cosEnter, float cosExit, float sinExit)
     {
         if (!_HasInfoIcon()) return;
 
-        // Panel 이 열려 있는 동안에는 아이콘을 건드리지 않습니다.
-        // (여는 순간 _HideIcon 으로 꺼졌고, 읽는 중에 다시 켜지면 본문을 덮습니다)
-        if (_IsOverlayOpen()) return;
+        bool proximity = _GetOpenModeIndex() == (int)ExhibitOpenMode.Proximity;
+
+        // Panel 이 열려 있는 동안에는 자리를 다시 계산하지 않습니다. (열린 Panel 은 고정)
+        if (_IsOverlayOpen())
+        {
+            if (proximity) _TickProximityOpen(headPosition, headForward, cosExit, sinExit);
+            return;
+        }
 
         Vector3 center = _GetIconCenter();
         Vector3 toHead = headPosition - center;
@@ -419,6 +457,12 @@ public class ExhibitInteractable : UdonSharpBehaviour
         _iconHeadPosition = headPosition;
         _iconDepthHalf = depthHalf;
 
+        if (proximity)
+        {
+            _TickProximityClosed(center, headPosition, headForward, deltaTime, cosEnter);
+            return;
+        }
+
         // ---- 시선 판정 (히스테리시스) ---------------------------------------
         // 아이콘을 조준하려고 고개를 돌리면 작품 중심이 시야에서 벗어나 아이콘이 사라지는
         // 자기모순이 생깁니다. 그래서 "나타남" 과 "유지" 의 조건을 분리합니다.
@@ -441,6 +485,123 @@ public class ExhibitInteractable : UdonSharpBehaviour
         }
 
         _ApplyIconVisual(hold, deltaTime);
+    }
+
+    // ---------------------------------------------------------------------
+    // Proximity Open
+    //
+    // 여는 대상과 유지하는 대상이 다릅니다. 열 때는 "작품을 보고 있는가" 를 묻고,
+    // 유지할 때는 "Panel 을 보고 있는가" 를 묻습니다. Panel 은 작품 옆에 서므로 가까이서
+    // 읽을수록 작품 중심은 시야 밖으로 밀려나고, 같은 기준을 쓰면 다가갈수록 닫힙니다.
+    // ---------------------------------------------------------------------
+
+    /// <summary>닫혀 있는 동안. 응시가 proximityOpenDelay 만큼 쌓이면 엽니다.</summary>
+    private void _TickProximityClosed(Vector3 center, Vector3 headPosition, Vector3 headForward,
+                                      float deltaTime, float cosEnter)
+    {
+        // 근접 모드에서 아이콘은 한 번도 켜지지 않습니다. (모드를 바꾼 직후를 위한 정리)
+        _HideIcon();
+
+        // 자동으로 닫힌 게 아니라 × 버튼으로 닫혔다면, 시선이 한 번 벗어나기 전까지 잠급니다.
+        if (_proximityOpen)
+        {
+            _ReleaseProximity();
+            _proximityLatched = true;
+            _gazeTimer = 0f;
+        }
+
+        if (!Utilities.IsValid(manager)) return;
+
+        bool aimed = _WithinCone(center - headPosition, headForward, cosEnter);
+
+        if (!aimed)
+        {
+            _proximityLatched = false;
+            _gazeTimer = 0f;
+            return;
+        }
+
+        if (_proximityLatched) return;
+
+        // 음수 구간은 닫힌 직후의 쿨다운입니다.
+        if (_gazeTimer < 0f)
+        {
+            _gazeTimer += deltaTime;
+            if (_gazeTimer < 0f) return;
+            _gazeTimer = 0f;
+        }
+
+        if (!manager._CanArmProximity(this)) { _gazeTimer = 0f; return; }
+
+        _gazeTimer += deltaTime;
+        if (_gazeTimer < manager.proximityOpenDelay) return;
+
+        _gazeTimer = 0f;
+        _proximityOpen = true;
+        manager._SetProximityOwner(this);
+        _OpenOverlay();
+    }
+
+    /// <summary>열려 있는 동안. 거리를 벗어나거나 Panel 이 시야를 벗어나면 닫습니다.</summary>
+    private void _TickProximityOpen(Vector3 headPosition, Vector3 headForward,
+                                    float cosExit, float sinExit)
+    {
+        if (!_proximityOpen) return;
+
+        Vector3 center = _GetIconCenter();
+        Vector3 toCenter = center - headPosition;
+
+        float scale = Utilities.IsValid(manager) ? manager.proximityExitRangeScale : 1.25f;
+        if (scale < 1f) scale = 1f;
+        float range = _GetGazeDistance() * scale;
+
+        bool hold = toCenter.sqrMagnitude <= range * range &&
+                    (_WithinCone(toCenter, headForward, cosExit) ||
+                     _PanelWithinCone(headPosition, headForward, cosExit, sinExit));
+
+        if (hold) return;
+
+        float cooldown = Utilities.IsValid(manager) ? manager.proximityCloseCooldown : 0f;
+
+        _ReleaseProximity();
+        _gazeTimer = -cooldown;
+        _CloseOverlay();
+    }
+
+    /// <summary>
+    /// Panel 을 반지름 r 인 구로 보고 시야 원뿔과 만나는지 봅니다.
+    ///
+    /// toPanel 을 시선축 성분 x 와 반경 성분 y 로 나누면 교차 조건이
+    /// <c>y·cos(exit) − x·sin(exit) ≤ r</c> 이라 Acos/Asin 없이 sqrt 한 번으로 끝납니다.
+    /// r 은 거리에 대해 각반경으로 환산되므로 가까이 갈수록 판정이 저절로 넓어집니다.
+    /// </summary>
+    private bool _PanelWithinCone(Vector3 headPosition, Vector3 headForward,
+                                  float cosExit, float sinExit)
+    {
+        if (!Utilities.IsValid(overlay)) return false;
+
+        Vector3 toPanel = overlay.transform.position - headPosition;
+
+        float halfWidth = overlay._GetWorldHalfWidth();
+        float halfHeight = overlay._GetWorldHalfHeight();
+        float radiusSq = halfWidth * halfWidth + halfHeight * halfHeight;
+
+        float distanceSq = toPanel.sqrMagnitude;
+        if (distanceSq <= radiusSq) return true;      // 머리가 Panel 안
+
+        float axial = Vector3.Dot(toPanel, headForward);
+        if (axial <= 0f) return false;                // Panel 이 등 뒤
+
+        float radial = Mathf.Sqrt(distanceSq - axial * axial);
+        return radial * cosExit - axial * sinExit <= Mathf.Sqrt(radiusSq);
+    }
+
+    /// <summary>근접 소유권을 반납합니다. 열림 상태 플래그만 정리하고 Overlay 는 건드리지 않습니다.</summary>
+    private void _ReleaseProximity()
+    {
+        if (!_proximityOpen) return;
+        _proximityOpen = false;
+        if (Utilities.IsValid(manager)) manager._ClearProximityOwner(this);
     }
 
     /// <summary>
@@ -499,23 +660,14 @@ public class ExhibitInteractable : UdonSharpBehaviour
     // ---------------------------------------------------------------------
 
     /// <summary>
-    /// ExhibitManager 를 찾아 연결합니다.
-    ///  1) 자기 Hierarchy Root 안을 먼저 찾습니다. Transform Root 는 항상 같은 Scene 이므로
-    ///     Additive Scene 에서도 안전합니다.
-    ///  2) 못 찾으면 이름으로 찾습니다. (GameObject.Find)
+    /// ExhibitManager 를 찾아 연결합니다. 1) 자기 Hierarchy Root 안 (항상 같은 Scene) →
+    /// 2) 이름으로 (GameObject.Find).
     ///
-    /// Scene 검증에 대하여
-    ///  Udon 은 UnityEngine.SceneManagement.Scene 타입을 전혀 노출하지 않습니다.
-    ///  (GameObject.scene / Scene.GetRootGameObjects 모두 화이트리스트에 없어 UdonSharp 컴파일이 실패합니다.
-    ///   VRChat Worlds SDK 3.10.4 의 Udon extern 목록으로 확인했습니다.)
-    ///  따라서 런타임에서는 2) 가 찾은 오브젝트가 같은 Scene 인지 확인할 방법이 없습니다.
-    ///
-    ///  Additive 로 여러 Scene 을 띄우고 각 Scene 에 동명의 Manager 를 두는 구성이라면
-    ///  2) 가 다른 Scene 의 Manager 를 물 수 있고, 그 Scene 이 언로드되면 이 작품이 멈춥니다.
-    ///  그런 구성에서는 반드시 Tools > Exhibit Descriptor > Setup > All Exhibits In Scene 을 실행하세요.
-    ///  Editor 도구는 같은 Scene 의 Manager 만 manager 필드에 구워 넣으므로 1)/2) 가 아예 실행되지 않습니다.
-    ///
-    ///  (Manager 를 못 찾아도 Overlay 는 애니메이션만 생략하고 열림/닫힘은 동작합니다.)
+    /// <b>2) 는 Scene 을 가릴 수 없습니다.</b> Udon 은 <c>Scene</c> 타입을 전혀 노출하지 않아
+    /// (3.10.4 extern 목록으로 확인) 찾은 오브젝트가 같은 Scene 인지 알 방법이 없습니다. Additive 로
+    /// 동명의 Manager 를 여러 Scene 에 두는 구성이라면 Setup > All Exhibits In Scene 을 실행하세요 —
+    /// Editor 도구가 같은 Scene 의 Manager 를 구워 넣으므로 1)/2) 가 아예 실행되지 않습니다.
+    /// (못 찾아도 Overlay 는 애니메이션만 생략하고 열림/닫힘은 동작합니다)
     /// </summary>
     private void _EnsureManager()
     {
@@ -559,14 +711,9 @@ public class ExhibitInteractable : UdonSharpBehaviour
     }
 
     /// <summary>
-    /// 찾아낸 Manager 를 참조에 넣고 **등록까지** 마칩니다.
-    ///
-    /// OnEnable() 시점에는 Manager 오브젝트가 아직 없거나 꺼져 있어서 못 찾는 일이 흔합니다.
-    /// 그 경우 Start() 나 첫 Interact() 에서 뒤늦게 찾게 되는데, 참조만 채우고 끝내면
-    /// 이 작품은 Manager 의 등록 목록에 영영 들어가지 못해 언어 전환 브로드캐스트
-    /// (_OnLanguageChanged) 를 한 번도 받지 못합니다.
-    ///
-    /// _RegisterExhibit 은 중복 등록을 스스로 걸러 내므로 OnEnable 의 등록과 겹쳐도 안전합니다.
+    /// 찾아낸 Manager 를 참조에 넣고 <b>등록까지</b> 마칩니다. OnEnable 에서 Manager 를 못 찾아
+    /// 뒤늦게(Start / 첫 Interact) 찾은 경우, 참조만 채우면 등록 목록에 영영 못 들어가 언어 전환
+    /// 브로드캐스트를 받지 못합니다. _RegisterExhibit 이 중복을 걸러 내므로 겹쳐도 안전합니다.
     /// </summary>
     private void _LinkManager(ExhibitManager found)
     {
@@ -654,16 +801,12 @@ public class ExhibitInteractable : UdonSharpBehaviour
     /// 벽면 바로 앞에서 기울이면 한쪽 절반이 벽 안으로 들어갑니다. 파고드는 깊이는
     /// <c>반폭 × sin(기울기)</c> 이고, 아래 <c>deepest</c> 가 바로 그 값입니다.
     ///
-    /// <b>순환과 2회 반복:</b> deepest 는 판의 회전에서 나오고, 회전은 위치에서, 위치는 다시
-    /// standoff 에서 나오므로 순환합니다. 이 순환은 <b>돌려준 standoff 와 짝이 맞는 회전
-    /// (<see cref="_resolvedRotation"/>)을 그대로 적용</b>하는 것으로 끊습니다. 그래서 여백 보장은
-    /// 반복 횟수와 무관하게 정확히 성립합니다(1회로도 성립 — 테스트로 확인).
-    /// 2회를 도는 것은 보장을 위해서가 아니라, 적용되는 회전이 최종 위치에서 본 방향에 더 가깝게
-    /// 만들기 위한 것입니다. 1회면 회전을 0.04m 지점에서 구하는데 최종 위치는 0.2m 앞일 수 있어
-    /// 판이 몇 도 비스듬해집니다. 각 반복은 dot 몇 개와 LookRotation 한 번이라 무해합니다.
+    /// <b>순환과 2회 반복:</b> deepest 는 회전에서, 회전은 위치에서, 위치는 다시 standoff 에서
+    /// 나오므로 순환합니다. 돌려준 standoff 와 짝이 맞는 회전(<see cref="_resolvedRotation"/>)을
+    /// 그대로 적용해 끊으므로 여백 보장은 반복 1회로도 성립합니다. 2회를 도는 것은 회전이 최종
+    /// 위치에서 본 방향에 더 가깝도록(1회면 판이 몇 도 비스듬해집니다) 하기 위해서입니다.
     ///
-    /// 빈 구간(<see cref="_corridorBack"/> / <see cref="_corridorFront"/>)은 호출 전에
-    /// <see cref="_MeasureCorridorAt"/> 로 <b>그 판의 자리에서</b> 재 둬야 합니다.
+    /// 빈 구간은 호출 전에 <see cref="_MeasureCorridorAt"/> 로 <b>그 판의 자리에서</b> 재 둬야 합니다.
     /// </summary>
     private float _ResolveStandoff(Vector3 spot, Vector3 front, Vector3 headPosition,
                                   float halfWidth, float halfHeight, float depthHalf)
