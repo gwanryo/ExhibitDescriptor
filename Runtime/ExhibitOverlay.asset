@@ -17,7 +17,7 @@ MonoBehaviour:
   assemblyError: 
   sourceCsScript: {fileID: 11500000, guid: dbe096994bfe462f99d1b51cc9e12604, type: 3}
   scriptVersion: 2
-  compiledVersion: 2
+  compiledVersion: 0
   behaviourSyncMode: 1
   hasInteractEvent: 0
   scriptID: 0

@@ -101,7 +101,7 @@ public class ExhibitLanguageSwitch : UdonSharpBehaviour
     /// Udon 은 UnityEngine.SceneManagement.Scene 타입을 노출하지 않으므로
     /// (GameObject.scene / Scene.GetRootGameObjects 모두 사용 불가)
     /// 2) 가 찾은 오브젝트가 같은 Scene 인지 런타임에서 확인할 수 없습니다.
-    /// Additive Scene 구성이라면 Tools > Exhibit Descriptor > Setup All Exhibits In Scene 으로
+    /// Additive Scene 구성이라면 Tools > Exhibit Descriptor > Setup > All Exhibits In Scene 으로
     /// manager 를 미리 연결하세요. (Editor 도구는 같은 Scene 의 Manager 만 연결합니다.)
     /// 자세한 내용은 ExhibitInteractable._EnsureManager() 의 주석을 참고하세요.
     /// </summary>
@@ -141,7 +141,7 @@ public class ExhibitLanguageSwitch : UdonSharpBehaviour
         {
             _warnedNoManager = true;
             Debug.LogWarning("[ExhibitLanguageSwitch] ExhibitManager 를 찾지 못했습니다: " + gameObject.name +
-                             " (Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 실행하면 " +
+                             " (Tools > Exhibit Descriptor > Setup > All Exhibits In Scene 을 실행하면 " +
                              "같은 Scene 의 Manager 가 manager 필드에 연결됩니다)");
         }
     }

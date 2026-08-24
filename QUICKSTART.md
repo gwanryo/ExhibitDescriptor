@@ -20,12 +20,27 @@ Unity 가 컴파일을 끝내면 상단에 **`Tools > Exhibit Descriptor`** 메�
 
 ---
 
-## 1. 만들기 — 메뉴 2번
+## 1. 창을 엽니다
 
 ```
-Tools > Exhibit Descriptor > Create Exhibition Root
-Tools > Exhibit Descriptor > Create Exhibit (Template)
+Tools > Exhibit Descriptor > Exhibit Descriptor
 ```
+
+**이 창 하나로 끝까지 갑니다.** 위에서 아래로 세 구역이고, 순서대로 내려오면 됩니다.
+
+```
+┌─ Exhibit Descriptor ─────────────────────────┐
+│ ① 전시 준비                                   │
+│    Overlay 폰트  ·  벽 판정 Layer  ·  기본 언어 │
+│ ② 작품                                        │
+│    만들기  ·  Setup  ·  저장할 때 자동 Setup    │
+│ ③ 점검                                        │
+│    검사 → 오류·경고를 묶어서 보여 줌            │
+└──────────────────────────────────────────────┘
+```
+
+아직 전시가 없으면 창이 **`ExhibitionRoot 만들기`** 버튼 하나만 보여 줍니다. 그것을 누르세요.
+그다음 `② 작품` 의 **`빈 작품 1개 만들기`** 를 누릅니다.
 
 Hierarchy 에 이렇게 생깁니다.
 
@@ -37,6 +52,17 @@ ExhibitionRoot
 
 `Exhibit_New` 안의 Overlay·버튼·Collider·참조 연결은 **전부 자동으로 만들어져 있습니다.**
 수동으로 드래그해서 연결할 것은 없습니다.
+
+> 창을 안 쓰고 메뉴로 해도 같습니다 — `Create > Exhibition Root`, `Create > Exhibit (Template)`.
+> 창은 그 메뉴들을 부르는 얼굴일 뿐입니다.
+
+### 한글을 쓸 거라면 지금 폰트를 넣으세요
+
+`① 전시 준비` 의 **`Overlay 폰트`** 가 비어 있으면 창이 빨간 글씨로 알려 줍니다. 비워 두면
+설명이 통째로 `□□□` 으로 보입니다 — TMP 기본 폰트에는 한글 글리프가 없습니다.
+
+CJK 글리프를 담은 TMP Font Asset 을 여기에 넣으면 **창이 그 자리에서 작품 전체에 반영합니다.**
+(만드는 방법은 [README 의 "CJK 폰트"](README.md#-설정))
 
 ---
 
@@ -77,9 +103,7 @@ EN / JP 는 **비워 둬도 됩니다.** 비어 있으면 자동으로 KR 로 �
 > 글자가 정방향으로 읽힙니다. 그래서 Anchor 의 forward 는 관람자 반대쪽을 봅니다.
 > 글자 방향도 런타임이 맞춥니다. 작품 앞뒤 어디에서 봐도 정방향으로 읽힙니다.
 
-> **한글이 □ 로 보이면** 폰트 문제입니다. TMP 기본 폰트에는 한글 글리프가 없습니다.
-> CJK Font Asset 을 만들어 `ExhibitManager` 의 **`Exhibit Descriptor Settings > Overlay Font`** 에 넣고
-> `Tools > Exhibit Descriptor > Setup All Exhibits In Scene` 을 한 번 실행하세요.
+> **한글이 □ 로 보이면** 폰트 문제입니다. 1단계의 `Overlay 폰트` 를 채우세요.
 > (만드는 방법은 [README 의 "CJK 폰트"](README.md#-설정))
 
 ---
@@ -100,7 +124,7 @@ EN / JP 는 **비워 둬도 됩니다.** 비어 있으면 자동으로 KR 로 �
 Hierarchy 에서 **작품 Mesh 들을 전부 선택**하고:
 
 ```
-Tools > Exhibit Descriptor > Create Exhibits From Selected Meshes
+Tools > Exhibit Descriptor > Create > Exhibits From Selected Meshes
 ```
 
 선택한 Mesh 하나당 Exhibit 이 하나씩 만들어지고, 각 Mesh 는 World 위치를 유지한 채
@@ -132,7 +156,7 @@ Tools > Exhibit Descriptor > Create Exhibits From Selected Meshes
 1. `Exhibit_New` 를 `Ctrl+D` 로 복제 (또는 Prefab 으로 저장해 두고 드래그)
 2. 위치를 옮기고 Title / Description 만 바꾸기
 
-> `Create Exhibit (Template)` 은 **원본 1개를 만드는 도구**이고,
+> `Create > Exhibit (Template)` (창의 `빈 작품 1개 만들기`) 은 **원본 1개를 만드는 도구**이고,
 > **선택한 오브젝트를 부모로 삼습니다.** `Room_1F` 을 선택하고 실행하면 그 아래에 생깁니다.
 
 ---
@@ -142,7 +166,7 @@ Tools > Exhibit Descriptor > Create Exhibits From Selected Meshes
 ### 그냥 저장하세요
 
 ```
-Tools > Exhibit Descriptor > Auto Setup On Save   ← 기본 ON (체크 표시)
+Tools > Exhibit Descriptor > Setup > Auto Setup On Save   ← 기본 ON (체크 표시)
 ```
 
 켜져 있으면 **Scene 을 저장할 때(Ctrl+S) 그 Scene 의 작품 전체에 Setup 이 자동으로 돕니다.**
@@ -153,13 +177,13 @@ Tools > Exhibit Descriptor > Auto Setup On Save   ← 기본 ON (체크 표시)
 
 ### 수동으로 누를 때도 하나씩이 아닙니다
 
-`Setup Selected Exhibits` 는
+`Setup > Selected Exhibits` 는
 
 - Ctrl 로 **여러 개 선택**해도 한 번에 처리하고
 - **부모 하나만** 선택해도 그 아래 자식 작품을 전부 처리합니다 (`ExhibitionRoot` 선택 → 전부)
-- 선택조차 귀찮으면 `Setup All Exhibits In Scene` (열린 Scene 전체)
+- 선택조차 귀찮으면 `Setup > All Exhibits In Scene` (열린 Scene 전체) — 창의 `Setup — 씬 전체` 와 같습니다
 
-그리고 `Create Exhibit (Template)` 과 `Create Exhibits From Selected Meshes` 는
+그리고 `Create > Exhibit (Template)` 과 `Create > Exhibits From Selected Meshes` 는
 **생성할 때 Setup 을 이미 자동 실행**합니다. 갓 만든 작품에 또 누를 필요 없습니다.
 
 ### 수동 Setup 이 실제로 필요한 경우
@@ -177,8 +201,8 @@ Auto Setup 을 꺼 뒀다면 이 둘만 기억하면 됩니다.
 
 ## 그 밖에
 
-- **한글이 □ 로 보임** — 폰트 문제입니다. [README 의 "CJK 폰트"](README.md#-설정) 만 보세요
-- **뭔가 이상함** — `Tools > Exhibit Descriptor > Validate Scene` 이 원인을 Console 에 찍어 줍니다
+- **한글이 □ 로 보임** — 창의 `① 전시 준비 > Overlay 폰트` 를 채우세요. [README 의 "CJK 폰트"](README.md#-설정)
+- **뭔가 이상함** — 창의 **`③ 점검 > 검사`** 를 누르세요. 같은 문제끼리 묶어 보여 주고, 줄의 `선택` 이 범인 오브젝트로 데려다줍니다
 
 ---
 
@@ -186,8 +210,8 @@ Auto Setup 을 꺼 뒀다면 이 둘만 기억하면 됩니다.
 
 | 증상 | 원인 |
 |---|---|
-| 툴팁이 안 뜬다 | `Setup Selected Exhibits` 를 안 돌렸거나, 2m 밖에 서 있음 |
-| 한글이 □ | TMP 폰트에 CJK 글리프 없음 (README 의 CJK 폰트) |
+| 툴팁이 안 뜬다 | Setup 을 안 돌렸거나, 2m 밖에 서 있음 |
+| 한글이 □ | 창의 `Overlay 폰트` 가 비었거나 CJK 글리프 없음 |
 | 월드 입장하자마자 Overlay 가 다 켜져 있음 | `Overlay` 오브젝트가 활성 상태로 저장됨 → 체크 해제 |
 | 버튼이 안 눌린다 | 버튼 Layer 가 `Default` 가 아님 |
 | Tools 메뉴가 없다 | UdonSharp 컴파일 에러 (Console 확인) |

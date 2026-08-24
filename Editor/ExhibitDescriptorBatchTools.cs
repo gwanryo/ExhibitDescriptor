@@ -20,7 +20,7 @@ public static partial class ExhibitDescriptorTools
     // 5. 선택한 Mesh 로 작품 일괄 생성
     // =====================================================================
 
-    [MenuItem(MenuRoot + "Create Exhibits From Selected Meshes", false, 12)]
+    [MenuItem(MenuRoot + "Create/Exhibits From Selected Meshes", false, 12)]
     public static void CreateExhibitsFromSelectedMeshes()
     {
         GameObject[] selection = Selection.gameObjects;
@@ -46,6 +46,9 @@ public static partial class ExhibitDescriptorTools
         Dictionary<Scene, int> nextIndex = new Dictionary<Scene, int>();
 
         List<GameObject> created = new List<GameObject>();
+
+        // 전시 전체 설정이므로 변환 루프에 들어가기 전에 Scene 당 1회만 굽습니다.
+        BakeIconProbeLayersForLoadedScenes();
 
         for (int i = 0; i < sources.Count; i++)
         {
@@ -159,7 +162,7 @@ public static partial class ExhibitDescriptorTools
 
         // 참조 연결 / 기하 굽기 / Interact 값 굽기는 최종 위치에 자리 잡은 뒤에 합니다.
         // (기하는 SetupExhibitFull 안에서 매번 다시 구우므로 여기서 따로 계산하지 않습니다)
-        SetupExhibitFull(interactable);
+        TrySetupExhibitFull(interactable);
         MarkSceneDirtyFor(exhibit);
 
         return exhibit;
@@ -451,11 +454,11 @@ public static partial class ExhibitDescriptorTools
     // 6. 저장 시 자동 Setup
     // =====================================================================
 
-    private const string AutoSetupMenuPath = MenuRoot + "Auto Setup On Save";
+    private const string AutoSetupMenuPath = MenuRoot + "Setup/Auto Setup On Save";
     private const string AutoSetupPrefKey = "ExhibitDescriptor.AutoSetupOnSave";
 
     /// <summary>
-    /// Scene 을 저장할 때 <c>Setup All Exhibits In Scene</c> 을 자동으로 돌릴지 여부입니다.
+    /// Scene 을 저장할 때 <c>Setup > All Exhibits In Scene</c> 을 자동으로 돌릴지 여부입니다.
     /// EditorPrefs 라 프로젝트가 아니라 이 PC 의 Unity 설정에 저장됩니다.
     /// </summary>
     public static bool AutoSetupOnSave
@@ -502,11 +505,19 @@ public static partial class ExhibitDescriptorTools
 
         if (exhibits.Count == 0 && switches.Count == 0) return;
 
-        for (int i = 0; i < exhibits.Count; i++) SetupExhibitFull(exhibits[i]);
-        for (int i = 0; i < switches.Count; i++) SetupLanguageSwitch(switches[i]);
+        // 전시 전체 설정이므로 작품 루프에 들어가기 전에 Scene 당 1회만 굽습니다.
+        BakeIconProbeLayersForScene(scene);
+
+        // 작품 하나가 실패해도 나머지는 반드시 처리합니다. 예전에는 첫 작품에서 예외가 나면
+        // 나머지 작품과 언어 전환 버튼이 전부 건너뛰어져, 사용자에게는 "저장했는데 아무것도
+        // 반영되지 않음" 으로만 보였습니다.
+        int failed = 0;
+        for (int i = 0; i < exhibits.Count; i++) { if (!TrySetupExhibitFull(exhibits[i])) failed++; }
+        for (int i = 0; i < switches.Count; i++) { if (!TrySetupLanguageSwitch(switches[i])) failed++; }
 
         Debug.Log("[ExhibitDescriptor] 저장 전 자동 Setup - Scene '" + scene.name + "': 작품 " + exhibits.Count +
-                  " 개, 언어 전환 버튼 " + switches.Count + " 개");
+                  " 개, 언어 전환 버튼 " + switches.Count + " 개" +
+                  (failed > 0 ? " (실패 " + failed + " 개 - 위 오류를 확인하세요)" : ""));
     }
 }
 

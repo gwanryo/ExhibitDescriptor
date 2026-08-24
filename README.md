@@ -66,8 +66,8 @@
 ## ⚡ 60초 시작
 
 ```
-Tools > Exhibit Descriptor > Create Exhibition Root
-Tools > Exhibit Descriptor > Create Exhibit (Template)
+Tools > Exhibit Descriptor > Create > Exhibition Root
+Tools > Exhibit Descriptor > Create > Exhibit (Template)
 ```
 
 ```
@@ -81,7 +81,7 @@ Overlay·버튼·Collider·참조 연결은 전부 자동으로 만들어져 있
 
 > [!TIP]
 > 이미 Scene 에 작품 Mesh 를 배치해 뒀다면 전부 선택하고
-> **`Create Exhibits From Selected Meshes`** — 100개도 한 번에 작품이 됩니다.
+> **`Create > Exhibits From Selected Meshes`** — 100개도 한 번에 작품이 됩니다.
 
 👉 처음이라면 **[QUICKSTART.md](QUICKSTART.md)** 가 10분짜리 안내입니다. 이 문서는 레퍼런스입니다.
 
@@ -126,19 +126,47 @@ side = sign( dot(head - artworkCenter, thinAxisWorld) )
 
 ## 🛠️ 에디터 도구
 
-`Tools > Exhibit Descriptor`
+### Exhibit Descriptor 창
+
+```
+Tools > Exhibit Descriptor > Exhibit Descriptor
+```
+
+**평소에는 이 창만 쓰면 됩니다.** 설정·만들기·점검이 위에서 아래로 한 화면에 있습니다.
+
+| 구역 | 하는 일 |
+|---|---|
+| **① 전시 준비** | Scene 마다 한 블록. `Overlay 폰트` · `벽 판정 Layer` · `기본 언어` — **안 채우면 반드시 막히는 값 셋** |
+| **② 작품** | 선택한 Mesh 를 작품으로 · 빈 작품 1개 · Setup(선택/씬 전체) · `저장할 때 자동 Setup` 체크 |
+| **③ 점검** | `검사` 를 누르면 오류·경고를 **같은 문제끼리 접어서** 보여 줍니다. 줄의 `선택` 을 누르면 그 오브젝트가 Hierarchy 에서 잡힙니다 |
+
+창이 하는 일 중 메뉴가 못 하는 것이 둘 있습니다.
+
+- **폰트·레이어를 고치면 그 자리에서 반영합니다.** 이 두 값은 Setup 이 굽기 전에는 아무 효과가
+  없습니다. 값만 넣고 Setup 을 잊어 한글이 계속 □ 로 보이는 것이 가장 흔한 사고였는데, 창에서
+  고치면 바로 구워지고 `작품 47개에 반영했습니다` 처럼 결과가 한 줄로 남습니다.
+- **작품 100개가 같은 문제를 가지면 한 줄로 접힙니다.** 콘솔은 100줄을 쏟아 내 나머지 문제를
+  스크롤 밖으로 밀어냅니다.
+
+> 세부 값(아이콘 크기·시선 각도·페이드·스캔 수)은 창에 없습니다. `ExhibitManager` Inspector 에
+> 그대로 있고, 창의 `ExhibitManager 선택` 버튼이 거기로 데려다줍니다. 값의 **원본은 언제나
+> Scene 의 컴포넌트**입니다 — 창은 그것을 그려 주기만 하므로 Inspector 와 어긋나지 않고
+> `Ctrl+Z` 도 그대로 됩니다.
+
+### 메뉴
 
 | 메뉴 | 하는 일 |
 |---|---|
-| `Create Exhibition Root` | Root + Manager 생성 (활성 Scene 기준 중복 검사) |
-| `Create Exhibit (Template)` | 작품 1개 전체 생성 + 자동 연결 (선택한 오브젝트를 부모로) |
-| **`Create Exhibits From Selected Meshes`** | 선택한 Mesh 를 **일괄** 작품화. World 위치 유지, 이름 보존 |
-| `Setup Selected Exhibits` | 참조 자동 연결 + Interact 값 베이크 (부모 하나만 골라도 자식 전체) |
-| `Setup All Exhibits In Scene` | 열린 모든 Scene 일괄 (연결은 각자의 Scene 안에서만) |
-| **`Auto Setup On Save`** | Scene 저장 시 자동 Setup — **기본 ON**. 평소엔 Setup 을 누를 일이 없습니다 |
-| `Migrate Exhibits From 1.x` | 1.x 구성을 ⓘ 아이콘 구성으로 변환 (Undo 가능) |
-| `Migrate Overlay Layout` | 2.1 이하의 판넬 안 버튼을 판넬 밖 버튼 열로 이동 (Undo 가능) |
-| `Validate Scene` | Collider·Canvas·참조 누락·폰트 글리프·판넬 들어갈 자리를 콘솔에 보고 |
+| `Create > Exhibition Root` | Root + Manager 생성 (활성 Scene 기준 중복 검사) |
+| `Create > Exhibit (Template)` | 작품 1개 전체 생성 + 자동 연결 (선택한 오브젝트를 부모로) |
+| **`Create > Exhibits From Selected Meshes`** | 선택한 Mesh 를 **일괄** 작품화. World 위치 유지, 이름 보존 |
+| `Setup > Selected Exhibits` | 참조 자동 연결 + Interact 값 베이크 (부모 하나만 골라도 자식 전체) |
+| `Setup > All Exhibits In Scene` | 열린 모든 Scene 일괄 (연결은 각자의 Scene 안에서만) |
+| **`Setup > Auto Setup On Save`** | Scene 저장 시 자동 Setup — **기본 ON**. 평소엔 Setup 을 누를 일이 없습니다 |
+| `Validate Scene` | 창의 ③ 점검과 같은 검사를 **콘솔에** 보고 (배치 스크립트·CI 용) |
+
+`Validate Scene` 과 창의 `검사` 는 같은 함수를 씁니다. 찾는 것은 한 곳에서 하고 보여주는 곳만
+둘이라, 창과 콘솔의 결과가 갈라지지 않습니다.
 
 <details>
 <summary><b>일괄 변환이 자동으로 계산하는 것</b></summary>
@@ -237,8 +265,8 @@ TMP 기본 폰트(`LiberationSans SDF`)에는 한글·일본어 글리프가 없
      ```
      <sub>ASCII + 일본어 かな + CJK 통합한자 + 한글 완성형 + 전각기호</sub>
 3. **Generate Font Atlas → Save as** `NotoSansCJK SDF`
-4. `ExhibitManager` 의 **`Exhibit Descriptor Settings > Overlay Font`** 슬롯에 지정
-5. `Setup All Exhibits In Scene` 실행 → Scene 전체 텍스트에 한 번에 적용
+4. **Exhibit Descriptor 창의 `① 전시 준비 > Overlay 폰트`** 에 지정 (또는 `ExhibitManager` 의 `Exhibit Descriptor Settings > Overlay Font` 슬롯)
+5. 창에서 지정했다면 **이미 반영되어 있습니다.** Inspector 에서 직접 넣었다면 `Setup > All Exhibits In Scene` 을 한 번 실행하세요
 
 **폰트를 동봉하지 않는 이유** — CJK 폰트는 재배포 조건이 제각각입니다. 패키지가 폰트를 품으면 이 패키지를 쓰는 월드까지 그 라이선스를 지게 되므로, 선택은 프로젝트에 맡기고 슬롯만 제공합니다.
 
@@ -280,9 +308,10 @@ manager._CycleLanguage();
 | Tools 메뉴가 없다 | UdonSharp 컴파일 에러 → Console 확인 |
 | Prefab 복제 후 Manager 참조가 비어 있음 | 정상 — Scene 참조는 Prefab 에 저장 안 됨. Setup 실행 |
 | 빌드 시 Udon serialization 에러 | `VRChat SDK > Utilities > Reserialize All Udon Assets` |
+| 저장할 때 `CopyProxyToUdon` NullReferenceException | U# 프로그램 미컴파일 → `VRChat SDK > Udon Sharp > Compile All UdonSharp Programs`. 2.2.1 부터는 이 상태에서도 나머지 작품 Setup 은 끝까지 돌고, 콘솔에 원인을 남깁니다 |
 | `Multiple EventSystems in scene` | Scene 의 EventSystem 삭제 (VRChat 이 자체 제공) |
 
-무슨 일이 나든 먼저 **`Tools > Exhibit Descriptor > Validate Scene`** 을 돌리세요. 원인을 콘솔에 찍어 줍니다.
+무슨 일이 나든 먼저 **`Tools > Exhibit Descriptor > Exhibit Descriptor`** 창을 열고 **③ 점검**의 `검사` 를 누르세요. 같은 문제끼리 묶어 보여 주고, 줄의 `선택` 이 범인 오브젝트로 데려다줍니다. (콘솔로 받고 싶으면 `Validate Scene`)
 
 ---
 
@@ -297,39 +326,6 @@ manager._CycleLanguage();
 | 폰트 | Font Asset 1개 공유 → 아틀라스 1장 |
 
 `ExhibitionRoot/Room_1F`, `Room_2F` 처럼 층·전시실 단위로 묶고 멀리 있는 구역은 통째로 비활성화하세요. Static Batching 은 작품 Mesh 에만.
-
----
-
-## ⬆️ 1.x 에서 올라오기
-
-2.0 은 **판정 방식이 바뀐 파괴적 변경**입니다. 1.x 는 작품 정면을 덮는 `InteractionArea` 로 Interact 를 받았고, 설명 위치는 생성 시점 Bounds 로 한 번 구워져 작품을 옮기면 어긋났습니다.
-
-```
-Tools > Exhibit Descriptor > Migrate Exhibits From 1.x
-```
-
-`InteractionArea` / `OverlayAnchor` 를 제거하고 아이콘을 만들어 연결합니다. `Ctrl+Z` 로 되돌릴 수 있습니다.
-
-- **제거됨** — `ExhibitInteractRelay`, `InteractionArea` / `OverlayAnchor` 오브젝트, `snapToAnchorOnOpen` / `overlayAnchor` / `interactRelays` 필드, 작품 Root 의 `Interact()`
-- `Setup` 은 아이콘을 **만들어 주기만** 하고 오브젝트를 지우지 않습니다 — 저장 훅 도중 파괴를 피하려고 제거는 명시적 메뉴로 분리했습니다
-
-**2.1** — 판넬과 아이콘이 벽에 잠기지 않도록 Raycast 로 빈 구간을 재고 기울어진 만큼만 빼냅니다. 정면에서는 벽에 붙고, 비스듬히 볼 때만 나옵니다. 판넬이 열려 있는 동안에는 아이콘이 숨습니다(본문 첫 줄을 덮지 않게) — **닫기는 판넬의 `×` 버튼으로** 합니다.
-
-**2.2** — `×` / `▲` / `▼` 를 판넬 **밖 오른쪽 열**로 옮겼습니다.
-
-VRChat 의 Interact 툴팁은 Collider **위쪽**으로 자라고 가로로는 Collider 중심에 정렬됩니다. 그래서
-버튼이 판넬 안 아래쪽에 있으면 "위로 / 아래로 / 닫기" 툴팁이 설명 본문과 겹쳐 글자를 읽을 수 없었습니다
-(아이콘의 "설명" 툴팁을 2.1 에서 숨긴 것과 같은 문제입니다). 툴팁이 뜨는 자리는 Collider 자리이므로
-버튼을 본문 사각형 밖으로 내보내는 것이 유일한 구조적 해법입니다.
-
-- 버튼이 쓰던 판넬 아래쪽 띠(96px)는 본문이 되찾습니다 → **읽는 영역이 68px 넓어집니다**
-- Overlay Canvas 폭이 `600 → 704px`(0.704m) 로 늘어, 옆 여유 요구가 `0.77 → 0.874m` 가 됩니다.
-  좁은 벽감은 `Validate Scene` 이 새 기준으로 다시 알려 줍니다
-- 열은 `Panel` 의 자식이라 열림 애니메이션(0.92 → 1.0)을 같이 탑니다
-- **2.1 이하 씬:** `Tools > Exhibit Descriptor > Migrate Overlay Layout` 을 한 번 실행하세요. 기존 버튼
-  오브젝트를 그대로 옮기므로 `action` · 언어 문구 · 구워 둔 `proximity` · Overlay 참조가 보존됩니다.
-  (`Ctrl+Z` 로 되돌릴 수 있고, 여러 번 실행해도 안전합니다. `Migrate Exhibits From 1.x` 는 이 작업을
-  자동으로 함께 수행합니다)
 
 ---
 

@@ -512,7 +512,7 @@ public class ExhibitInteractable : UdonSharpBehaviour
     ///
     ///  Additive 로 여러 Scene 을 띄우고 각 Scene 에 동명의 Manager 를 두는 구성이라면
     ///  2) 가 다른 Scene 의 Manager 를 물 수 있고, 그 Scene 이 언로드되면 이 작품이 멈춥니다.
-    ///  그런 구성에서는 반드시 Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 실행하세요.
+    ///  그런 구성에서는 반드시 Tools > Exhibit Descriptor > Setup > All Exhibits In Scene 을 실행하세요.
     ///  Editor 도구는 같은 Scene 의 Manager 만 manager 필드에 구워 넣으므로 1)/2) 가 아예 실행되지 않습니다.
     ///
     ///  (Manager 를 못 찾아도 Overlay 는 애니메이션만 생략하고 열림/닫힘은 동작합니다.)
@@ -553,7 +553,7 @@ public class ExhibitInteractable : UdonSharpBehaviour
         {
             _warnedNoManager = true;
             Debug.LogWarning("[ExhibitInteractable] ExhibitManager 를 찾지 못했습니다: " + gameObject.name +
-                             " (Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 실행하면 " +
+                             " (Tools > Exhibit Descriptor > Setup > All Exhibits In Scene 을 실행하면 " +
                              "같은 Scene 의 Manager 가 manager 필드에 연결됩니다)");
         }
     }
@@ -879,7 +879,7 @@ public class ExhibitInteractable : UdonSharpBehaviour
         // 반면 Interact 거리(proximity)는 UdonBehaviour 쪽 필드라 UdonSharp 에서 접근할 수 없습니다.
         // (UdonSharpBehaviour 에 proximity 멤버가 없습니다 - Worlds SDK 3.10.4 기준)
         // 그래서 거리는 Editor Tool 이 UdonBehaviour 에 직접 구워 넣습니다:
-        //  Tools > Exhibit Descriptor > Setup All Exhibits In Scene
+        //  Tools > Exhibit Descriptor > Setup > All Exhibits In Scene
         // -----------------------------------------------------------------
         InteractionText = text;
 

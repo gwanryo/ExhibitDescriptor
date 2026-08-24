@@ -14,15 +14,16 @@ using VRC.Udon;
 /// Exhibit Descriptor 용 Editor 자동화 도구.
 ///
 /// Tools > Exhibit Descriptor
-///   - Create Exhibition Root            : ExhibitionRoot + ExhibitManager(+ ExhibitDescriptorSettings) 생성
-///   - Create Exhibit (Template)         : Overlay 포함 작품 1개를 통째로 생성 + 자동 연결
-///   - Create Exhibits From Selected Meshes : 선택한 Mesh 를 작품으로 일괄 변환 (ExhibitDescriptorBatchTools.cs)
-///   - Setup Selected Exhibits           : 선택한 작품들의 참조 자동 연결 + Interact 값 반영
-///   - Setup All Exhibits In Scene       : 씬 전체 일괄 처리 (100개 이상일 때 사용)
-///   - Migrate Exhibits From 1.x         : 1.x 의 InteractionArea / OverlayAnchor 제거
-///   - Migrate Overlay Layout            : 2.1 이하의 판넬 안 버튼을 판넬 밖 버튼 열로 이동
-///   - Auto Setup On Save                : 저장할 때 자동으로 Setup 실행 (ExhibitDescriptorBatchTools.cs)
-///   - Validate Scene                    : 누락된 참조/Collider 를 콘솔에 보고
+///   - Exhibit Descriptor                     : 설정·만들기·점검을 한 화면에서 (ExhibitDescriptorWindow.cs)
+///   - Create / Exhibition Root               : ExhibitionRoot + ExhibitManager(+ ExhibitDescriptorSettings) 생성
+///   - Create / Exhibit (Template)            : Overlay 포함 작품 1개를 통째로 생성 + 자동 연결
+///   - Create / Exhibits From Selected Meshes : 선택한 Mesh 를 작품으로 일괄 변환 (ExhibitDescriptorBatchTools.cs)
+///   - Setup  / Selected Exhibits             : 선택한 작품들의 참조 자동 연결 + Interact 값 반영
+///   - Setup  / All Exhibits In Scene         : 씬 전체 일괄 처리 (100개 이상일 때 사용)
+///   - Setup  / Auto Setup On Save            : 저장할 때 자동으로 Setup 실행 (ExhibitDescriptorBatchTools.cs)
+///   - Validate Scene                         : 누락된 참조/Collider 를 콘솔에 보고 (ExhibitDescriptorValidation.cs)
+///
+/// 창은 이 메뉴들을 부르는 얼굴일 뿐입니다 — 로직의 두 번째 사본을 갖지 않습니다.
 ///
 /// 이 파일은 Editor 폴더에 있으므로 빌드에 포함되지 않습니다.
 /// </summary>
@@ -83,7 +84,7 @@ public static partial class ExhibitDescriptorTools
     // 1. ExhibitionRoot + ExhibitManager
     // =====================================================================
 
-    [MenuItem(MenuRoot + "Create Exhibition Root", false, 10)]
+    [MenuItem(MenuRoot + "Create/Exhibition Root", false, 10)]
     public static void CreateExhibitionRoot()
     {
         // Additive Scene 대응: "Scene 당 1개" 규칙이므로 활성 Scene 안에서만 중복을 검사합니다.
@@ -121,7 +122,7 @@ public static partial class ExhibitDescriptorTools
     // 2. Exhibit 템플릿 생성
     // =====================================================================
 
-    [MenuItem(MenuRoot + "Create Exhibit (Template)", false, 11)]
+    [MenuItem(MenuRoot + "Create/Exhibit (Template)", false, 11)]
     public static void CreateExhibitTemplate()
     {
         GameObject parent = null;
@@ -154,7 +155,8 @@ public static partial class ExhibitDescriptorTools
 
         // 참조 연결은 작품이 최종 Scene 에 자리 잡은 뒤에 합니다.
         // (manager 는 Scene 참조라, 옮기기 전에 연결하면 다른 Scene 의 Manager 를 물 수 있습니다.)
-        SetupExhibitFull(exhibit.GetComponent<ExhibitInteractable>());
+        BakeIconProbeLayersForScene(exhibit.scene);
+        TrySetupExhibitFull(exhibit.GetComponent<ExhibitInteractable>());
 
         Undo.RegisterCreatedObjectUndo(exhibit, "Create Exhibit");
         Selection.activeGameObject = exhibit;
@@ -163,7 +165,7 @@ public static partial class ExhibitDescriptorTools
         if (managers.Count == 0)
         {
             Debug.LogWarning("[ExhibitDescriptor] Scene(" + targetScene.name + ") 에 ExhibitManager 가 없습니다. " +
-                             "Create Exhibition Root 를 먼저 실행하세요. (manager 참조가 비어 있는 상태로 생성됩니다)", exhibit);
+                             "Create > Exhibition Root 를 먼저 실행하세요. (manager 참조가 비어 있는 상태로 생성됩니다)", exhibit);
         }
 
         Debug.Log("[ExhibitDescriptor] Exhibit 템플릿을 생성했습니다. Inspector 에서 데이터를 입력한 뒤 Prefab 으로 저장하세요.");
@@ -551,23 +553,16 @@ public static partial class ExhibitDescriptorTools
     /// <summary>
     /// 버튼의 RectTransform 과 BoxCollider 를 한 자리에 맞춥니다.
     ///
-    /// 생성(<see cref="CreateButton"/>)과 이전(<see cref="MigrateOverlayLayout"/>)이 같은 함수를
-    /// 쓰기 때문에 Collider 중심 계산이 두 곳으로 갈라지지 않습니다. Collider 가 rect 와 어긋나면
-    /// 보이는 곳과 눌리는 곳이 달라집니다.
+    /// 버튼을 놓는 모든 경로가 이 함수 하나를 쓰기 때문에 Collider 중심 계산이 두 곳으로
+    /// 갈라지지 않습니다. Collider 가 rect 와 어긋나면 보이는 곳과 눌리는 곳이 달라집니다.
     ///
-    /// <paramref name="record"/> 가 true 면 Undo 에 기록합니다. (이미 Scene 에 있는 버튼을 옮길 때)
+    /// Undo 는 기록하지 않습니다. 지금 이 함수를 부르는 것은 <b>갓 만든</b> 버튼을 처음 배치하는
+    /// 경로뿐이고, 그 오브젝트 전체가 이미 <c>RegisterCreatedObjectUndo</c> 로 묶여 있습니다.
     /// </summary>
-    private static void PlaceButton(Transform button, Vector2 anchor, Vector2 anchoredPosition,
-                                    Vector2 size, bool record = false)
+    private static void PlaceButton(Transform button, Vector2 anchor, Vector2 anchoredPosition, Vector2 size)
     {
         RectTransform rect = button.GetComponent<RectTransform>();
         BoxCollider collider = button.GetComponent<BoxCollider>();
-
-        if (record)
-        {
-            Undo.RecordObject(rect, "Place Overlay Button");
-            if (collider != null) Undo.RecordObject(collider, "Place Overlay Button");
-        }
 
         rect.anchorMin = anchor;
         rect.anchorMax = anchor;
@@ -602,7 +597,7 @@ public static partial class ExhibitDescriptorTools
     // 3. 자동 연결 (Setup)
     // =====================================================================
 
-    [MenuItem(MenuRoot + "Setup Selected Exhibits", false, 30)]
+    [MenuItem(MenuRoot + "Setup/Selected Exhibits", false, 30)]
     public static void SetupSelectedExhibits()
     {
         GameObject[] selection = Selection.gameObjects;
@@ -615,6 +610,9 @@ public static partial class ExhibitDescriptorTools
         // 폰트를 읽기 전에 옛 Scene 의 Manager 에 설정 컴포넌트를 보강합니다.
         EnsureSettingsForLoadedScenes();
 
+        // 전시 전체 설정이므로 작품 루프에 들어가기 전에 Scene 당 1회만 굽습니다.
+        BakeIconProbeLayersForLoadedScenes();
+
         int count = 0;
         int switchCount = 0;
 
@@ -623,7 +621,7 @@ public static partial class ExhibitDescriptorTools
             ExhibitInteractable[] found = selection[i].GetComponentsInChildren<ExhibitInteractable>(true);
             for (int j = 0; j < found.Length; j++)
             {
-                SetupExhibitFull(found[j]);
+                if (!TrySetupExhibitFull(found[j])) continue;
                 MarkSceneDirtyFor(found[j].gameObject);
                 count++;
             }
@@ -631,7 +629,7 @@ public static partial class ExhibitDescriptorTools
             ExhibitLanguageSwitch[] switches = selection[i].GetComponentsInChildren<ExhibitLanguageSwitch>(true);
             for (int j = 0; j < switches.Length; j++)
             {
-                SetupLanguageSwitch(switches[j]);
+                if (!TrySetupLanguageSwitch(switches[j])) continue;
                 MarkSceneDirtyFor(switches[j].gameObject);
                 switchCount++;
             }
@@ -640,25 +638,28 @@ public static partial class ExhibitDescriptorTools
         Debug.Log("[ExhibitDescriptor] Setup 완료: 작품 " + count + " 개, 언어 전환 버튼 " + switchCount + " 개");
     }
 
-    [MenuItem(MenuRoot + "Setup All Exhibits In Scene", false, 31)]
+    [MenuItem(MenuRoot + "Setup/All Exhibits In Scene", false, 31)]
     public static void SetupAllExhibitsInScene()
     {
         // 폰트를 읽기 전에 옛 Scene 의 Manager 에 설정 컴포넌트를 보강합니다.
         EnsureSettingsForLoadedScenes();
+
+        // 전시 전체 설정이므로 작품 루프에 들어가기 전에 Scene 당 1회만 굽습니다.
+        BakeIconProbeLayersForLoadedScenes();
 
         // 로드된 모든 Scene 을 처리합니다. manager 연결은 각 오브젝트가 속한 Scene 기준으로
         // 이루어지므로, Additive 로 여러 Scene 을 열어 둔 상태에서도 교차 참조가 생기지 않습니다.
         ExhibitInteractable[] all = Object.FindObjectsOfType<ExhibitInteractable>(true);
         for (int i = 0; i < all.Length; i++)
         {
-            SetupExhibitFull(all[i]);
+            if (!TrySetupExhibitFull(all[i])) continue;
             MarkSceneDirtyFor(all[i].gameObject);
         }
 
         ExhibitLanguageSwitch[] switches = Object.FindObjectsOfType<ExhibitLanguageSwitch>(true);
         for (int i = 0; i < switches.Length; i++)
         {
-            SetupLanguageSwitch(switches[i]);
+            if (!TrySetupLanguageSwitch(switches[i])) continue;
             MarkSceneDirtyFor(switches[i].gameObject);
         }
 
@@ -692,12 +693,76 @@ public static partial class ExhibitDescriptorTools
         }
     }
 
+    // =====================================================================
+    // 3.1. Udon 동기화 방어
+    // =====================================================================
+
+    /// <summary>
+    /// <c>UdonSharpEditorUtility.CopyProxyToUdon</c> 을 안전하게 호출합니다.
+    ///
+    /// UdonSharp 의 가드는 <c>ScriptVersion</c> / <c>CompiledVersion</c> 만 봅니다
+    /// (<c>UdonSharpEditorUtility.cs:1162-1166</c>). 그런데 실제로 힙 쓰기에 쓰이는 것은
+    /// <c>fieldDefinitions</c> 이고, 이것은 <b>컴파일러만</b> 채웁니다
+    /// (<c>UdonSharpCompilerV1.cs:790-805</c>). 그래서 "미컴파일인데 버전만 최신" 인 program asset
+    /// 에서는 세 가드를 모두 통과한 뒤 <c>fieldDefinitions.Values</c> 에서 NullReferenceException 이
+    /// 납니다 (<c>UdonVariableStorageInterface.cs:114</c>).
+    ///
+    /// 여기서 미리 걸러 내면 그 NRE 가 Setup 루프를 통째로 중단시키는 일이 없습니다.
+    /// </summary>
+    /// <returns>실제로 동기화했으면 true.</returns>
+    internal static bool TryCopyProxyToUdon(UdonSharpBehaviour proxy)
+    {
+        if (proxy == null) return false;
+
+        UdonSharpProgramAsset programAsset = UdonSharpEditorUtility.GetUdonSharpProgramAsset(proxy);
+
+        if (programAsset == null || programAsset.fieldDefinitions == null)
+        {
+            WarnUncompiledProgramAsset(proxy);
+            return false;
+        }
+
+        try
+        {
+            UdonSharpEditorUtility.CopyProxyToUdon(proxy);
+            return true;
+        }
+        catch (System.Exception e)
+        {
+            // 버전 가드(InvalidOperationException)와 그 밖의 직렬화 실패를 여기서 흡수합니다.
+            // 한 컴포넌트의 실패가 나머지 작품의 Setup 까지 무효화되면 안 됩니다.
+            Debug.LogError("[ExhibitDescriptor] Udon 동기화에 실패해 건너뜁니다: " +
+                           GetPath(proxy.transform) + " (" + proxy.GetType().Name + ")\n" + e, proxy);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 미컴파일 program asset 경고. 작품 수만큼 같은 줄이 쏟아지지 않도록 타입당 한 번만 찍습니다.
+    /// (Setup 은 저장할 때마다 도는데, 작품 100개면 콘솔이 같은 경고로 덮입니다)
+    /// </summary>
+    private static readonly HashSet<string> WarnedUncompiledTypes = new HashSet<string>();
+
+    private static void WarnUncompiledProgramAsset(UdonSharpBehaviour proxy)
+    {
+        string typeName = proxy.GetType().Name;
+        if (!WarnedUncompiledTypes.Add(typeName)) return;
+
+        Debug.LogError("[ExhibitDescriptor] '" + typeName + "' 의 U# 프로그램이 아직 컴파일되지 않아 " +
+                       "Udon 동기화를 건너뜁니다. VRChat SDK > Udon Sharp > Compile All UdonSharp Programs " +
+                       "를 실행한 뒤 다시 저장하세요. (그래도 반복되면 Force Upgrade 를 실행하세요)", proxy);
+    }
+
     /// <summary>
     /// 같은 Scene 의 <see cref="ExhibitDescriptorSettings.iconProbeLayers"/> 를 Manager 의
     /// <c>iconProbeLayerMask</c>(int) 에 굽습니다.
     ///
     /// 사람이 비워 두면(0) 기본값으로 되돌립니다. 0 은 "아무 레이어도 보지 않음" 이라 그대로 구우면
     /// 벽 측정이 통째로 죽어 아이콘이 다시 벽에 잠깁니다.
+    ///
+    /// <b>호출 위치</b>: 이것은 전시 전체 설정이라 작품마다 부를 필요가 없습니다. 예전에는
+    /// <c>SetupInteractable</c> 안에 있어서 작품 N 개면 Manager 의 <c>CopyProxyToUdon</c> 이 N 번
+    /// 돌았습니다. 지금은 Setup 진입점마다 Scene 당 1회만 부릅니다.
     /// </summary>
     private static void BakeIconProbeLayers(ExhibitManager manager)
     {
@@ -717,8 +782,69 @@ public static partial class ExhibitDescriptorTools
         so.ApplyModifiedProperties();
 
         EditorUtility.SetDirty(manager);
-        UdonSharpEditorUtility.CopyProxyToUdon(manager);
+        TryCopyProxyToUdon(manager);
         RecordPrefabModifications(manager);
+    }
+
+    /// <summary>한 Scene 의 모든 Manager 에 벽 판정 레이어를 굽습니다.</summary>
+    internal static void BakeIconProbeLayersForScene(Scene scene)
+    {
+        if (!scene.IsValid() || !scene.isLoaded) return;
+
+        List<ExhibitManager> managers = CollectManagersInScene(scene);
+        for (int i = 0; i < managers.Count; i++) BakeIconProbeLayers(managers[i]);
+    }
+
+    /// <summary>열려 있는 모든 Scene 에 벽 판정 레이어를 굽습니다. (Additive Scene 대응)</summary>
+    private static void BakeIconProbeLayersForLoadedScenes()
+    {
+        for (int s = 0; s < SceneManager.sceneCount; s++)
+        {
+            BakeIconProbeLayersForScene(SceneManager.GetSceneAt(s));
+        }
+    }
+
+    /// <summary>
+    /// 작품 하나의 Setup 실패가 나머지 작품 전부를 건너뛰게 만들지 않도록 감쌉니다.
+    ///
+    /// 이 방어가 없으면 첫 작품에서 예외가 났을 때 <c>Auto Setup On Save</c> 가 통째로 무효가 되고,
+    /// 사용자에게는 "저장했는데 아무것도 반영되지 않음" 으로만 보입니다. 원인이 무엇이든 그 침묵이
+    /// 가장 나쁜 실패 모드입니다.
+    /// </summary>
+    /// <returns>성공했으면 true.</returns>
+    private static bool TrySetupExhibitFull(ExhibitInteractable interactable)
+    {
+        if (interactable == null) return false;
+
+        try
+        {
+            SetupExhibitFull(interactable);
+            return true;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("[ExhibitDescriptor] 작품 Setup 에 실패해 건너뜁니다: " +
+                           GetPath(interactable.transform) + "\n" + e, interactable);
+            return false;
+        }
+    }
+
+    /// <summary><see cref="TrySetupExhibitFull"/> 의 언어 전환 버튼 판본입니다.</summary>
+    private static bool TrySetupLanguageSwitch(ExhibitLanguageSwitch languageSwitch)
+    {
+        if (languageSwitch == null) return false;
+
+        try
+        {
+            SetupLanguageSwitch(languageSwitch);
+            return true;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("[ExhibitDescriptor] 언어 전환 버튼 Setup 에 실패해 건너뜁니다: " +
+                           GetPath(languageSwitch.transform) + "\n" + e, languageSwitch);
+            return false;
+        }
     }
 
     /// <summary>언어 전환 버튼에 같은 Scene 의 Manager 를 연결합니다.</summary>
@@ -744,7 +870,7 @@ public static partial class ExhibitDescriptorTools
         }
 
         EditorUtility.SetDirty(languageSwitch);
-        UdonSharpEditorUtility.CopyProxyToUdon(languageSwitch);
+        TryCopyProxyToUdon(languageSwitch);
         RecordPrefabModifications(languageSwitch);
     }
 
@@ -803,8 +929,9 @@ public static partial class ExhibitDescriptorTools
 
         so.ApplyModifiedProperties(); // Undo 지원 (Ctrl+Z 로 되돌릴 수 있음)
 
-        // 벽 판정 레이어는 전시 전체 설정이므로 작품마다 같은 값을 Manager 에 굽습니다. (멱등)
-        BakeIconProbeLayers(manager);
+        // 벽 판정 레이어(Manager)는 여기서 굽지 않습니다. 전시 전체 설정이라 Scene 당 1회면 되고,
+        // 작품마다 부르면 Manager 의 CopyProxyToUdon 이 작품 수만큼 반복됩니다.
+        // 각 Setup 진입점이 BakeIconProbeLayersForScene / ...ForLoadedScenes 로 먼저 처리합니다.
 
         // 런타임이 아이콘을 놓는 데 쓰는 기하 정보는 **매번 다시 굽습니다.**
         // 이것이 "Mesh 를 교체·이동·스케일해도 아이콘이 자동으로 따라온다" 의 실현 지점입니다.
@@ -824,7 +951,7 @@ public static partial class ExhibitDescriptorTools
         SetupInfoIcon(infoIcon, interactable, interactText, proximity);
 
         EditorUtility.SetDirty(interactable);
-        UdonSharpEditorUtility.CopyProxyToUdon(interactable);
+        TryCopyProxyToUdon(interactable);
         RecordPrefabModifications(interactable);
     }
 
@@ -900,7 +1027,7 @@ public static partial class ExhibitDescriptorTools
         ApplyOverlayFont(icon, FindOverlayFont(icon));
 
         EditorUtility.SetDirty(icon);
-        UdonSharpEditorUtility.CopyProxyToUdon(icon);
+        TryCopyProxyToUdon(icon);
         RecordPrefabModifications(icon);
     }
 
@@ -1009,7 +1136,7 @@ public static partial class ExhibitDescriptorTools
     }
 
     /// <summary>해당 Scene 안의 ExhibitManager 를 모두 모읍니다. (비활성 포함)</summary>
-    private static List<ExhibitManager> CollectManagersInScene(Scene scene)
+    internal static List<ExhibitManager> CollectManagersInScene(Scene scene)
     {
         List<ExhibitManager> result = new List<ExhibitManager>();
         if (!scene.IsValid()) return result;
@@ -1076,7 +1203,7 @@ public static partial class ExhibitDescriptorTools
         ApplyOverlayFont(overlay, FindOverlayFont(overlay));
 
         EditorUtility.SetDirty(overlay);
-        UdonSharpEditorUtility.CopyProxyToUdon(overlay);
+        TryCopyProxyToUdon(overlay);
         RecordPrefabModifications(overlay);
     }
 
@@ -1103,7 +1230,7 @@ public static partial class ExhibitDescriptorTools
     }
 
     /// <summary>해당 Scene 안의 <see cref="ExhibitDescriptorSettings"/> 를 모두 모읍니다. (비활성 포함)</summary>
-    private static List<ExhibitDescriptorSettings> CollectSettingsInScene(Scene scene)
+    internal static List<ExhibitDescriptorSettings> CollectSettingsInScene(Scene scene)
     {
         List<ExhibitDescriptorSettings> result = new List<ExhibitDescriptorSettings>();
         if (!scene.IsValid()) return result;
@@ -1121,7 +1248,7 @@ public static partial class ExhibitDescriptorTools
     /// <paramref name="managerObject"/> 에 <see cref="ExhibitDescriptorSettings"/> 를 보장합니다.
     /// (이미 있으면 그것을 그대로 돌려줍니다)
     /// </summary>
-    private static ExhibitDescriptorSettings EnsureSettings(GameObject managerObject)
+    internal static ExhibitDescriptorSettings EnsureSettings(GameObject managerObject)
     {
         if (managerObject == null) return null;
 
@@ -1240,7 +1367,7 @@ public static partial class ExhibitDescriptorTools
         }
 
         EditorUtility.SetDirty(button);
-        UdonSharpEditorUtility.CopyProxyToUdon(button);
+        TryCopyProxyToUdon(button);
         RecordPrefabModifications(button);
     }
 
@@ -1261,787 +1388,6 @@ public static partial class ExhibitDescriptorTools
         so.ApplyModifiedProperties();
         EditorUtility.SetDirty(udonBehaviour);
         RecordPrefabModifications(udonBehaviour);
-    }
-
-    // =====================================================================
-    // 3.5. 1.x 구성 정리 (마이그레이션)
-    // =====================================================================
-
-    /// <summary>
-    /// 1.x 로 만든 작품에 남아 있는 <c>InteractionArea</c> / <c>OverlayAnchor</c> 를 제거하고
-    /// 응시형 구성으로 맞춥니다. 선택이 있으면 그 안의 작품만, 없으면 열려 있는 모든 Scene 이 대상입니다.
-    ///
-    /// 왜 Setup 이 아니라 별도 메뉴인가: Setup 은 <c>Auto Setup On Save</c> 로 저장 직전에도 돌아가고,
-    /// 저장 중에 GameObject 를 파괴하는 것은 위험합니다. 오브젝트를 <b>만드는</b> 일(아이콘 생성)은
-    /// Setup 이 하지만 <b>지우는</b> 일은 사람이 한 번 명시적으로 실행하게 둡니다.
-    ///
-    /// <c>ExhibitInteractRelay</c> 는 2.0 에서 삭제되었으므로 그 컴포넌트가 붙어 있던 오브젝트는
-    /// Missing Script 상태로 남습니다. Collider 는 그대로 살아 있어 Interact 레이를 가로막으므로
-    /// 반드시 정리해야 합니다.
-    /// </summary>
-    [MenuItem(MenuRoot + "Migrate Exhibits From 1.x", false, 40)]
-    public static void MigrateExhibitsFrom1x()
-    {
-        List<ExhibitInteractable> targets = CollectMigrationTargets();
-        if (targets.Count == 0)
-        {
-            Debug.LogWarning("[ExhibitDescriptor] 대상 작품이 없습니다. Hierarchy 에서 작품을 선택하거나 " +
-                             "작품이 있는 Scene 을 열어 두세요.");
-            return;
-        }
-
-        int undoGroup = Undo.GetCurrentGroup();
-        int removed = 0;
-        int relaid = 0;
-
-        for (int i = 0; i < targets.Count; i++)
-        {
-            removed += RemoveLegacyParts(targets[i]);
-
-            // 1.x 씬의 Overlay 는 버튼이 판넬 안 아래쪽에 있습니다. 그대로 두면 Interact 툴팁이
-            // 본문을 덮으므로 여기서 함께 옮깁니다. (2.1 이하에서 올라오는 씬도 같은 처리가 필요합니다)
-            if (RelayoutOverlayButtons(targets[i])) relaid++;
-
-            SetupExhibitFull(targets[i]);          // 아이콘 생성 + 참조 연결 + 기하 굽기
-            MarkSceneDirtyFor(targets[i].gameObject);
-        }
-
-        Undo.SetCurrentGroupName("Migrate Exhibits From 1.x");
-        Undo.CollapseUndoOperations(undoGroup);
-
-        Debug.Log("[ExhibitDescriptor] 작품 " + targets.Count + " 개를 정리했습니다. " +
-                  "제거한 레거시 오브젝트 " + removed + " 개, 버튼 열로 옮긴 Overlay " + relaid + " 개. " +
-                  "아이콘 위치는 런타임이 정하므로 수동 보정은 필요하지 않습니다. (Ctrl+Z 로 되돌릴 수 있습니다)");
-    }
-
-    /// <summary>
-    /// 2.1 이하의 Overlay(버튼이 판넬 안 아래쪽)를 2.2 배치(판넬 밖 오른쪽 버튼 열)로 옮깁니다.
-    ///
-    /// 왜 Setup 이 아니라 별도 메뉴인가: Setup 은 <c>Auto Setup On Save</c> 로 저장 직전에도 도는데,
-    /// 사람이 손으로 맞춰 둔 판넬 레이아웃을 저장할 때마다 도구가 조용히 재배치하면 안 됩니다.
-    /// 그래서 <see cref="ValidateScene"/> 이 옛 배치를 <b>찾아 알리고</b>, 옮기는 것은 이 메뉴가
-    /// 한 번 명시적으로 합니다.
-    /// </summary>
-    [MenuItem(MenuRoot + "Migrate Overlay Layout", false, 41)]
-    public static void MigrateOverlayLayout()
-    {
-        List<ExhibitInteractable> targets = CollectMigrationTargets();
-        if (targets.Count == 0)
-        {
-            Debug.LogWarning("[ExhibitDescriptor] 대상 작품이 없습니다. Hierarchy 에서 작품을 선택하거나 " +
-                             "작품이 있는 Scene 을 열어 두세요.");
-            return;
-        }
-
-        int undoGroup = Undo.GetCurrentGroup();
-        int relaid = 0;
-
-        for (int i = 0; i < targets.Count; i++)
-        {
-            if (!RelayoutOverlayButtons(targets[i])) continue;
-
-            relaid++;
-            MarkSceneDirtyFor(targets[i].gameObject);
-        }
-
-        Undo.SetCurrentGroupName("Migrate Overlay Layout");
-        Undo.CollapseUndoOperations(undoGroup);
-
-        if (relaid == 0)
-        {
-            Debug.Log("[ExhibitDescriptor] 작품 " + targets.Count + " 개 모두 이미 버튼 열 배치입니다. 바꾼 것이 없습니다.");
-            return;
-        }
-
-        Debug.Log("[ExhibitDescriptor] Overlay " + relaid + " 개를 버튼 열 배치로 옮겼습니다. " +
-                  "버튼이 본문 밖으로 나가 Interact 툴팁이 글자를 덮지 않습니다. (Ctrl+Z 로 되돌릴 수 있습니다)");
-    }
-
-    /// <summary>
-    /// Overlay 하나를 버튼 열 배치로 옮깁니다. 이미 옮겨져 있으면 아무것도 하지 않고 false.
-    ///
-    /// 판넬 폭은 <b>건드리지 않습니다.</b> 사람이 크기를 바꿔 둔 판넬도 그대로 두고, Canvas 만
-    /// 버튼 열 폭만큼 넓혀 남는 자리에 열을 세웁니다. 그래서 본문이 좁아지는 일이 없습니다.
-    /// </summary>
-    private static bool RelayoutOverlayButtons(ExhibitInteractable interactable)
-    {
-        ExhibitOverlay overlay = interactable.GetComponentInChildren<ExhibitOverlay>(true);
-        if (overlay == null) return false;
-
-        Transform panel = FindChildRecursive(overlay.transform, "Panel");
-        if (panel == null) return false;
-
-        // 이미 옮겨져 있으면 그대로 둡니다. (여러 번 실행해도 안전)
-        if (FindChildRecursive(panel, "ButtonColumn") != null) return false;
-
-        ExhibitOverlayButton[] buttons = overlay.GetComponentsInChildren<ExhibitOverlayButton>(true);
-        if (buttons.Length == 0) return false;
-
-        RectTransform canvasRect = overlay.GetComponent<RectTransform>();
-        RectTransform panelRect = panel.GetComponent<RectTransform>();
-        if (canvasRect == null || panelRect == null) return false;
-
-        float bodyWidth = canvasRect.sizeDelta.x;
-
-        Undo.RecordObject(canvasRect, "Migrate Overlay Layout");
-        Undo.RecordObject(panelRect, "Migrate Overlay Layout");
-
-        // Canvas 를 버튼 열만큼 넓히고, 판넬은 왼쪽에 원래 폭으로 고정합니다.
-        canvasRect.sizeDelta = new Vector2(bodyWidth + ButtonColumnGap + ButtonColumnWidth, canvasRect.sizeDelta.y);
-
-        panelRect.anchorMin = new Vector2(0f, 0f);
-        panelRect.anchorMax = new Vector2(0f, 1f);
-        panelRect.pivot = new Vector2(0f, 0.5f);
-        panelRect.sizeDelta = new Vector2(bodyWidth, 0f);
-        panelRect.anchoredPosition = Vector2.zero;
-
-        // 버튼 열을 세우고 기존 버튼을 그대로 옮깁니다.
-        // (새로 만들면 action / 언어 문구 / 구워 둔 proximity 와 Overlay 참조를 모두 잃습니다)
-        GameObject column = new GameObject("ButtonColumn", typeof(RectTransform));
-        Undo.RegisterCreatedObjectUndo(column, "Migrate Overlay Layout");
-        Undo.SetTransformParent(column.transform, panel, "Migrate Overlay Layout");
-
-        column.layer = panel.gameObject.layer;
-        RectTransform columnRect = column.GetComponent<RectTransform>();
-        columnRect.localPosition = Vector3.zero;
-        columnRect.localRotation = Quaternion.identity;
-        columnRect.localScale = Vector3.one;
-        columnRect.anchorMin = new Vector2(1f, 0f);
-        columnRect.anchorMax = new Vector2(1f, 1f);
-        columnRect.pivot = new Vector2(0f, 0.5f);
-        columnRect.sizeDelta = new Vector2(ButtonColumnWidth, 0f);
-        columnRect.anchoredPosition = new Vector2(ButtonColumnGap, 0f);
-
-        Vector2 top = new Vector2(0.5f, 1f);
-        Vector2 size = new Vector2(OverlayButtonWidth, OverlayButtonHeight);
-
-        float closeY = 0f;
-        float upY = closeY - (OverlayButtonHeight + CloseButtonGap);
-        float downY = upY - (OverlayButtonHeight + OverlayButtonGap);
-
-        for (int i = 0; i < buttons.Length; i++)
-        {
-            ExhibitOverlayButton button = buttons[i];
-            if (button == null) continue;
-
-            Undo.SetTransformParent(button.transform, column.transform, "Migrate Overlay Layout");
-
-            int action = new SerializedObject(button).FindProperty("action").enumValueIndex;
-            float y = action == (int)ExhibitButtonAction.ScrollUp
-                ? upY
-                : (action == (int)ExhibitButtonAction.ScrollDown ? downY : closeY);
-
-            PlaceButton(button.transform, top, new Vector2(0f, y), size, true);
-        }
-
-        ReclaimButtonBand(panel);
-        return true;
-    }
-
-    /// <summary>
-    /// 버튼이 쓰던 판넬 아래쪽 띠를 본문에게 돌려줍니다.
-    ///
-    /// 기본값(96px)일 때만 손댑니다. 사람이 다른 값으로 맞춰 둔 여백은 그 사람의 의도이므로
-    /// 도구가 되돌리지 않습니다.
-    /// </summary>
-    private static void ReclaimButtonBand(Transform panel)
-    {
-        Transform scrollView = FindChildRecursive(panel, "DescriptionScrollView");
-        if (scrollView == null) return;
-
-        RectTransform scrollRect = scrollView.GetComponent<RectTransform>();
-        if (scrollRect == null) return;
-        if (!Mathf.Approximately(scrollRect.offsetMin.y, 96f)) return;
-
-        Undo.RecordObject(scrollRect, "Migrate Overlay Layout");
-        scrollRect.offsetMin = new Vector2(scrollRect.offsetMin.x, 28f);
-    }
-
-    private static List<ExhibitInteractable> CollectMigrationTargets()
-    {
-        List<ExhibitInteractable> result = new List<ExhibitInteractable>();
-        GameObject[] selection = Selection.gameObjects;
-
-        if (selection != null && selection.Length > 0)
-        {
-            for (int i = 0; i < selection.Length; i++)
-            {
-                if (selection[i] == null) continue;
-
-                ExhibitInteractable[] found = selection[i].GetComponentsInChildren<ExhibitInteractable>(true);
-                for (int j = 0; j < found.Length; j++)
-                {
-                    if (!result.Contains(found[j])) result.Add(found[j]);
-                }
-            }
-
-            return result;
-        }
-
-        ExhibitInteractable[] all = Object.FindObjectsOfType<ExhibitInteractable>(true);
-        for (int i = 0; i < all.Length; i++)
-        {
-            if (!result.Contains(all[i])) result.Add(all[i]);
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// <c>InteractionArea</c> / <c>OverlayAnchor</c> 자식을 제거하고 개수를 돌려줍니다.
-    ///
-    /// 이름으로만 지웁니다. 사용자가 다른 이름으로 만들어 둔 판정 영역이나 물리 충돌용 Collider 를
-    /// 도구가 임의로 지우지 않기 위해서입니다. 남은 것은 <see cref="ValidateScene"/> 이 경고합니다.
-    /// </summary>
-    private static int RemoveLegacyParts(ExhibitInteractable interactable)
-    {
-        int removed = 0;
-
-        for (int pass = 0; pass < 2; pass++)
-        {
-            string name = pass == 0 ? "InteractionArea" : "OverlayAnchor";
-
-            // 같은 이름이 여러 개일 수 있어 없어질 때까지 반복합니다.
-            while (true)
-            {
-                Transform found = FindChildRecursive(interactable.transform, name);
-                if (found == null || found == interactable.transform) break;
-
-                Debug.Log("[ExhibitDescriptor] 레거시 오브젝트를 제거했습니다: " + GetPath(found), interactable);
-                Undo.DestroyObjectImmediate(found.gameObject);
-                removed++;
-            }
-        }
-
-        return removed;
-    }
-
-
-    // =====================================================================
-    // 4. Validate
-    // =====================================================================
-
-    [MenuItem(MenuRoot + "Validate Scene", false, 50)]
-    public static void ValidateScene()
-    {
-        int errors = 0;
-
-        ExhibitInteractable[] exhibits = Object.FindObjectsOfType<ExhibitInteractable>(true);
-
-        // -----------------------------------------------------------------
-        // Manager 구성 검사 (Scene 별)
-        //  "Scene 당 1개" 가 규칙이므로 로드된 Scene 마다 따로 셉니다.
-        //  Additive 로 3개 Scene 을 열고 각 Scene 에 1개씩 둔 정상 구성은 통과해야 합니다.
-        // -----------------------------------------------------------------
-        int totalManagers = 0;
-
-        for (int s = 0; s < SceneManager.sceneCount; s++)
-        {
-            Scene scene = SceneManager.GetSceneAt(s);
-            if (!scene.isLoaded) continue;
-
-            List<ExhibitManager> managers = CollectManagersInScene(scene);
-            totalManagers += managers.Count;
-
-            int exhibitsInScene = 0;
-            for (int i = 0; i < exhibits.Length; i++)
-            {
-                if (exhibits[i].gameObject.scene == scene) exhibitsInScene++;
-            }
-
-            if (managers.Count == 0)
-            {
-                // 작품이 없는 Scene(환경 전용 등)에는 Manager 가 없어도 정상입니다.
-                if (exhibitsInScene > 0)
-                {
-                    Debug.LogError("[ExhibitDescriptor] Scene '" + scene.name + "' 에 작품이 " + exhibitsInScene +
-                                   " 개 있는데 ExhibitManager 가 없습니다. 이 Scene 에도 1개를 만들어 주세요.");
-                    errors++;
-                }
-                continue;
-            }
-
-            if (managers.Count > 1)
-            {
-                Debug.LogError("[ExhibitDescriptor] Scene '" + scene.name + "' 에 ExhibitManager 가 " + managers.Count +
-                               " 개 있습니다. Scene 당 1개만 남기세요.", managers[0]);
-                errors++;
-                continue;
-            }
-
-            ExhibitManager manager = managers[0];
-
-            if (!manager.gameObject.activeInHierarchy)
-            {
-                Debug.LogError("[ExhibitDescriptor] Scene '" + scene.name + "' 의 ExhibitManager 오브젝트가 비활성 상태입니다. " +
-                               "Update 틱이 돌지 않아 Overlay 애니메이션이 생략됩니다.", manager);
-                errors++;
-            }
-            // 오브젝트가 켜져 있어도 컴포넌트 체크가 꺼져 있으면 Update() 는 호출되지 않습니다.
-            // ExhibitOverlay._ManagerCanTick() 도 이 경우를 "쓸 수 없는 Manager" 로 보고
-            // Fade/Scale/스크롤을 전부 건너뛰므로, 런타임과 같은 기준으로 검사합니다.
-            else if (!manager.enabled)
-            {
-                Debug.LogError("[ExhibitDescriptor] Scene '" + scene.name + "' 의 ExhibitManager 컴포넌트가 비활성(enabled 체크 해제) 상태입니다. " +
-                               "Update 틱이 돌지 않아 Overlay 애니메이션이 생략됩니다.", manager);
-                errors++;
-            }
-            else if (manager.gameObject.name != "ExhibitManager")
-            {
-                Debug.LogWarning("[ExhibitDescriptor] Scene '" + scene.name + "' 의 ExhibitManager 오브젝트 이름이 " +
-                                 "'ExhibitManager' 가 아닙니다. 작품의 managerObjectName 과 일치시키거나 " +
-                                 "manager 를 직접 연결하세요.", manager);
-            }
-
-            // Overlay 폰트 슬롯은 Manager 가 아니라 이 컴포넌트에 있습니다(Udon 화이트리스트 때문).
-            // 옛 버전으로 만든 Scene 에는 없으므로 "폰트 미지정" 으로 동작합니다. 오류는 아닙니다.
-            if (CollectSettingsInScene(scene).Count == 0)
-            {
-                Debug.LogWarning("[ExhibitDescriptor] Scene '" + scene.name + "' 의 ExhibitManager 에 " +
-                                 "ExhibitDescriptorSettings 컴포넌트가 없어 Overlay 폰트를 지정할 수 없습니다. " +
-                                 "(지금은 폰트 미지정 = TMP 기본 폰트) " +
-                                 "Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 한 번 실행하면 " +
-                                 "자동으로 붙습니다.", manager);
-            }
-        }
-
-        if (totalManagers == 0 && exhibits.Length == 0)
-        {
-            Debug.LogError("[ExhibitDescriptor] 열려 있는 어떤 Scene 에도 ExhibitManager 가 없습니다.");
-            errors++;
-        }
-
-        for (int i = 0; i < exhibits.Length; i++)
-        {
-            ExhibitInteractable exhibit = exhibits[i];
-            string path = GetPath(exhibit.transform);
-
-            SerializedObject so = new SerializedObject(exhibit);
-
-            if (GetObject(so, "overlay") == null)
-            {
-                Debug.LogError("[ExhibitDescriptor] overlay 미연결: " + path, exhibit);
-                errors++;
-            }
-
-            // manager 는 Scene 참조입니다. 다른 Scene 을 가리키면 그 Scene 이 언로드될 때
-            // 언어 전환과 애니메이션 틱이 함께 끊깁니다.
-            ExhibitManager assignedManager = GetObject(so, "manager") as ExhibitManager;
-            if (assignedManager != null && assignedManager.gameObject.scene != exhibit.gameObject.scene)
-            {
-                Debug.LogError("[ExhibitDescriptor] manager 가 다른 Scene('" + assignedManager.gameObject.scene.name +
-                               "') 의 ExhibitManager 를 가리킵니다: " + path, exhibit);
-                errors++;
-            }
-
-            // Placeholder 는 완전히 투명해서 Scene View 만 봐서는 교체를 잊은 것을 알 수 없습니다.
-            // 일부러 비워 두는 경우도 있으므로 에러가 아니라 경고로만 알립니다.
-            if (UsesPlaceholderMaterial(exhibit))
-            {
-                Debug.LogWarning("[ExhibitDescriptor] Artwork 가 아직 투명 Placeholder 입니다. " +
-                                 "실제 작품 Mesh/Material 로 교체하세요: " + path, exhibit);
-            }
-
-            // -------------------------------------------------------------
-            // Interact 수단 검사. 판정은 ⓘ 아이콘 하나만 받습니다.
-            // (작품 정면에는 판정 영역이 없어야 정상입니다 - 그게 이 설계의 요점입니다)
-            // -------------------------------------------------------------
-            ExhibitInfoIcon icon = exhibit.GetComponentInChildren<ExhibitInfoIcon>(true);
-
-            if (icon == null)
-            {
-                Debug.LogError("[ExhibitDescriptor] ⓘ 아이콘이 없어 설명을 열 방법이 없습니다. " +
-                               "Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 실행하면 만들어집니다: " +
-                               path, exhibit);
-                errors++;
-            }
-            else
-            {
-                if (icon.GetComponent<Collider>() == null)
-                {
-                    Debug.LogError("[ExhibitDescriptor] ⓘ 아이콘에 Collider 가 없어 Interact 할 수 없습니다: " +
-                                   GetPath(icon.transform), icon);
-                    errors++;
-                }
-
-                Canvas iconCanvas = icon.GetComponent<Canvas>();
-                if (iconCanvas == null || iconCanvas.renderMode != RenderMode.WorldSpace)
-                {
-                    Debug.LogError("[ExhibitDescriptor] ⓘ 아이콘이 World Space Canvas 가 아닙니다: " +
-                                   GetPath(icon.transform), icon);
-                    errors++;
-                }
-
-                SerializedObject iconSo = new SerializedObject(icon);
-                if (GetObject(iconSo, "target") == null)
-                {
-                    Debug.LogError("[ExhibitDescriptor] ⓘ 아이콘의 target 이 비어 있습니다: " +
-                                   GetPath(icon.transform), icon);
-                    errors++;
-                }
-                if (GetObject(iconSo, "canvasGroup") == null)
-                {
-                    Debug.LogWarning("[ExhibitDescriptor] ⓘ 아이콘에 CanvasGroup 이 없어 페이드가 생략됩니다: " +
-                                     GetPath(icon.transform), icon);
-                }
-
-                // 기하가 0 이면 런타임이 아이콘 로직을 건너뜁니다 = 아이콘이 영영 뜨지 않습니다.
-                SerializedProperty extentsProperty = so.FindProperty("boundsExtentsLocal");
-                if (extentsProperty == null || extentsProperty.vector3Value.sqrMagnitude <= 0f)
-                {
-                    Debug.LogError("[ExhibitDescriptor] 기하 정보가 비어 있어 아이콘이 뜨지 않습니다. " +
-                                   "작품 Mesh(Renderer)가 있는지 확인하고 Setup 을 실행하세요: " + path, exhibit);
-                    errors++;
-                }
-
-                if (icon.gameObject.activeSelf)
-                {
-                    Debug.LogWarning("[ExhibitDescriptor] ⓘ 아이콘이 활성 상태로 저장되어 있습니다. " +
-                                     "비활성으로 저장하는 것을 권장합니다: " + GetPath(icon.transform), icon);
-                }
-
-                // 저작 시점에 "여기엔 Panel 이 들어갈 자리가 없다" 를 알려 줍니다.
-                // 런타임은 최대한 앞으로 클램프하지만, 그 상태를 조용히 두면 왜 잠기는지 알 수 없습니다.
-                WarnIfNoRoomForPanel(exhibit, path);
-                WarnIfSidewaysIsBlocked(exhibit, path);
-            }
-
-            // 작품 정면을 덮는 Collider 는 감상을 방해합니다. (1.x 의 InteractionArea 잔재 포함)
-            Collider[] strayColliders = exhibit.GetComponentsInChildren<Collider>(true);
-            for (int c = 0; c < strayColliders.Length; c++)
-            {
-                Collider stray = strayColliders[c];
-                if (stray == null) continue;
-                if (icon != null && stray.transform.IsChildOf(icon.transform)) continue;
-                if (stray.GetComponentInParent<ExhibitOverlay>(true) != null) continue;   // Overlay 버튼
-
-                Debug.LogWarning("[ExhibitDescriptor] 작품 안에 아이콘/Overlay 가 아닌 Collider 가 있습니다. " +
-                                 "Interact 레이가 여기에 먼저 막히면 아이콘을 클릭할 수 없습니다: " +
-                                 GetPath(stray.transform), stray);
-            }
-        }
-
-        ExhibitOverlay[] overlays = Object.FindObjectsOfType<ExhibitOverlay>(true);
-        for (int i = 0; i < overlays.Length; i++)
-        {
-            ExhibitOverlay overlay = overlays[i];
-            string path = GetPath(overlay.transform);
-            SerializedObject so = new SerializedObject(overlay);
-
-            if (GetObject(so, "canvasGroup") == null)
-            {
-                Debug.LogError("[ExhibitDescriptor] canvasGroup 미연결: " + path, overlay);
-                errors++;
-            }
-            if (GetObject(so, "descriptionText") == null)
-            {
-                Debug.LogError("[ExhibitDescriptor] descriptionText 미연결: " + path, overlay);
-                errors++;
-            }
-            if (GetObject(so, "scrollViewport") == null || GetObject(so, "scrollContent") == null)
-            {
-                Debug.LogWarning("[ExhibitDescriptor] scrollViewport / scrollContent 미연결 (스크롤 비활성): " + path, overlay);
-            }
-
-            Canvas canvas = overlay.GetComponent<Canvas>();
-            if (canvas != null && canvas.renderMode != RenderMode.WorldSpace)
-            {
-                Debug.LogError("[ExhibitDescriptor] Canvas Render Mode 가 World Space 가 아닙니다: " + path, overlay);
-                errors++;
-            }
-
-            if (overlay.gameObject.activeSelf)
-            {
-                Debug.LogWarning("[ExhibitDescriptor] Overlay 가 활성 상태로 저장되어 있습니다. 비활성으로 저장하는 것을 권장합니다: " + path, overlay);
-            }
-        }
-
-        ExhibitOverlayButton[] buttons = Object.FindObjectsOfType<ExhibitOverlayButton>(true);
-        for (int i = 0; i < buttons.Length; i++)
-        {
-            ExhibitOverlayButton button = buttons[i];
-            if (button.GetComponent<Collider>() == null)
-            {
-                Debug.LogError("[ExhibitDescriptor] 버튼에 Collider 가 없습니다: " + GetPath(button.transform), button);
-                errors++;
-            }
-            if (button.gameObject.layer != 0)
-            {
-                Debug.LogWarning("[ExhibitDescriptor] 버튼 Layer 가 Default 가 아닙니다(Interact 실패 가능): " + GetPath(button.transform), button);
-            }
-
-            // 2.1 이하 배치: 버튼이 판넬 안에 있으면 Interact 툴팁이 본문 글자를 덮습니다.
-            // (툴팁은 Collider 위쪽으로 자라므로 버튼이 본문 아래에 있는 한 구조적으로 겹칩니다)
-            Transform parent = button.transform.parent;
-            if (parent != null && parent.name != "ButtonColumn")
-            {
-                Debug.LogWarning("[ExhibitDescriptor] 버튼이 판넬 안에 있어 Interact 툴팁이 설명 본문을 덮습니다. " +
-                                 "Tools > Exhibit Descriptor > Migrate Overlay Layout 을 실행하세요: " +
-                                 GetPath(button.transform), button);
-            }
-        }
-
-        ExhibitLanguageSwitch[] switches = Object.FindObjectsOfType<ExhibitLanguageSwitch>(true);
-        for (int i = 0; i < switches.Length; i++)
-        {
-            ExhibitLanguageSwitch languageSwitch = switches[i];
-            string path = GetPath(languageSwitch.transform);
-            SerializedObject so = new SerializedObject(languageSwitch);
-
-            if (languageSwitch.GetComponent<Collider>() == null)
-            {
-                Debug.LogError("[ExhibitDescriptor] 언어 전환 버튼에 Collider 가 없습니다: " + path, languageSwitch);
-                errors++;
-            }
-
-            ExhibitManager assignedManager = GetObject(so, "manager") as ExhibitManager;
-            if (assignedManager != null && assignedManager.gameObject.scene != languageSwitch.gameObject.scene)
-            {
-                Debug.LogError("[ExhibitDescriptor] 언어 전환 버튼의 manager 가 다른 Scene('" +
-                               assignedManager.gameObject.scene.name + "') 을 가리킵니다: " + path, languageSwitch);
-                errors++;
-            }
-            else if (assignedManager == null && CollectManagersInScene(languageSwitch.gameObject.scene).Count == 0)
-            {
-                Debug.LogWarning("[ExhibitDescriptor] 언어 전환 버튼과 같은 Scene 에 ExhibitManager 가 없습니다: " + path, languageSwitch);
-            }
-        }
-
-        // 폰트에 글리프가 없으면 참조가 전부 맞아도 화면에는 □ 만 뜹니다.
-        ValidateFontGlyphs(overlays, switches);
-
-        if (errors == 0) Debug.Log("[ExhibitDescriptor] Validate 통과. 작품 " + exhibits.Length + " 개.");
-        else Debug.LogError("[ExhibitDescriptor] Validate 실패: 오류 " + errors + " 건.");
-    }
-
-    /// <summary>
-    /// 아이콘 자리의 앞뒤 여유가 Panel + 여백보다 좁으면 경고합니다.
-    /// 런타임과 같은 두 번의 Raycast 를 에디터에서 돌립니다.
-    ///
-    /// 작품이 콜라이더 안에 파묻힌 경우도 함께 봅니다 — 레이가 콜라이더 안에서 시작하면 그 콜라이더를
-    /// 보고하지 않으므로 앞뒤 측정이 둘 다 실패하고, 벽 보정이 동작하지 않습니다.
-    /// </summary>
-    private static void WarnIfNoRoomForPanel(ExhibitInteractable exhibit, string path)
-    {
-        SerializedObject so = new SerializedObject(exhibit);
-
-        SerializedProperty extentsProperty = so.FindProperty("boundsExtentsLocal");
-        if (extentsProperty == null || extentsProperty.vector3Value.sqrMagnitude <= 0f) return;
-
-        Vector3 centerLocal = so.FindProperty("boundsCenterLocal").vector3Value;
-        int thinAxis = so.FindProperty("thinAxis").intValue;
-
-        ExhibitManager manager = FindManagerForScene(exhibit);
-        int mask = manager != null ? manager.iconProbeLayerMask : DefaultIconProbeLayerMask;
-        float clearance = manager != null ? manager.iconClearance : 0.02f;
-
-        Transform t = exhibit.transform;
-        Vector3 center = t.TransformPoint(centerLocal);
-        Vector3 axis = t.rotation * (thinAxis == 0 ? Vector3.right : (thinAxis == 1 ? Vector3.up : Vector3.forward));
-
-        if (Physics.CheckSphere(center, 0.01f, mask))
-        {
-            Debug.LogWarning("[ExhibitDescriptor] 작품 중심이 콜라이더 안에 있어 벽 측정이 동작하지 않습니다. " +
-                             "작품을 벽에서 조금 빼내거나 그 콜라이더를 Icon Probe Layers 에서 제외하세요: " +
-                             path, exhibit);
-            return;
-        }
-
-        // 관람자가 설 수 있는 쪽을 정면으로 봅니다. (양쪽 다 막혀 있으면 + 쪽으로 가정)
-        RaycastHit sideHit;
-        bool positiveBlocked = Physics.Raycast(center, axis, out sideHit, 1f, mask, QueryTriggerInteraction.Ignore);
-        bool negativeBlocked = Physics.Raycast(center, -axis, out sideHit, 1f, mask, QueryTriggerInteraction.Ignore);
-        Vector3 front = positiveBlocked && !negativeBlocked ? -axis : axis;
-
-        RaycastHit hit;
-        float back = Physics.Raycast(center, -front, out hit, 1f, mask, QueryTriggerInteraction.Ignore) ? hit.distance : -1f;
-        float forward = Physics.Raycast(center, front, out hit, 1f, mask, QueryTriggerInteraction.Ignore) ? hit.distance : -1f;
-
-        if (back < 0f || forward < 0f) return;    // 한쪽이라도 열려 있으면 런타임이 해결합니다.
-
-        float needed = OverlayWidth * CanvasScale * 0.5f + clearance * 2f;
-        if (back + forward >= needed) return;
-
-        Debug.LogWarning("[ExhibitDescriptor] 아이콘 자리의 앞뒤 여유가 " + (back + forward).ToString("0.00") +
-                         "m 뿐이라 Panel(" + needed.ToString("0.00") + "m 필요)이 벽에 잠깁니다. " +
-                         "Icon Placement 를 다른 쪽으로 바꾸세요: " + path, exhibit);
-    }
-
-    /// <summary>
-    /// 아이콘이 붙는 <b>옆방향</b>에 Panel 이 들어갈 자리가 있는지 봅니다. 모서리에 걸린 작품을 찾는 검사입니다.
-    ///
-    /// 런타임은 사람이 고른 <c>Icon Placement</c> 를 존중하고 자동으로 뒤집지 않습니다. Right/Left 는
-    /// 관람자 기준이라 관람자가 걸어 다니면 판정이 경계에서 흔들리고, 그러면 아이콘이 좌우로 튀어
-    /// 클리핑보다 나쁜 증상이 됩니다. 그래서 <b>고르는 일은 사람이, 찾는 일은 이 검사가</b> 합니다.
-    ///
-    /// 필요한 여유는 "작품 가장자리 → 여백 → Panel 전체 폭" 입니다. 반대쪽이 넉넉하면 그쪽을 권합니다.
-    /// </summary>
-    private static void WarnIfSidewaysIsBlocked(ExhibitInteractable exhibit, string path)
-    {
-        SerializedObject so = new SerializedObject(exhibit);
-
-        SerializedProperty extentsProperty = so.FindProperty("boundsExtentsLocal");
-        if (extentsProperty == null || extentsProperty.vector3Value.sqrMagnitude <= 0f) return;
-
-        int placement = so.FindProperty("iconPlacement").enumValueIndex;
-        ExhibitManager manager = FindManagerForScene(exhibit);
-
-        if (placement == (int)ExhibitIconPlacement.Default)
-        {
-            placement = manager != null ? (int)manager.defaultIconPlacement : (int)ExhibitIconPlacement.Right;
-        }
-        // Above / Below 는 월드 Y 고정이라 이 검사의 대상이 아닙니다. (앞뒤 검사가 이미 봅니다)
-        if (placement != (int)ExhibitIconPlacement.Right && placement != (int)ExhibitIconPlacement.Left) return;
-
-        Vector3 extents = extentsProperty.vector3Value;
-        Vector3 centerLocal = so.FindProperty("boundsCenterLocal").vector3Value;
-        int thinAxis = so.FindProperty("thinAxis").intValue;
-
-        int mask = manager != null ? manager.iconProbeLayerMask : DefaultIconProbeLayerMask;
-        float clearance = manager != null ? manager.iconClearance : 0.02f;
-        float gap = manager != null ? manager.defaultIconGap : 0.15f;
-
-        Transform t = exhibit.transform;
-        Vector3 center = t.TransformPoint(centerLocal);
-        Vector3 axis = t.rotation * (thinAxis == 0 ? Vector3.right : (thinAxis == 1 ? Vector3.up : Vector3.forward));
-
-        // 관람자가 설 수 있는 쪽을 정면으로 봅니다.
-        RaycastHit hit;
-        bool positiveBlocked = Physics.Raycast(center, axis, out hit, 1f, mask, QueryTriggerInteraction.Ignore);
-        bool negativeBlocked = Physics.Raycast(center, -axis, out hit, 1f, mask, QueryTriggerInteraction.Ignore);
-        Vector3 front = positiveBlocked && !negativeBlocked ? -axis : axis;
-
-        Vector3 flat = new Vector3(front.x, 0f, front.z);
-        if (flat.sqrMagnitude < 0.0001f) return;    // 바닥에 눕힌 작품은 옆방향이 정해지지 않습니다.
-        flat = flat.normalized;
-
-        Vector3 chosen = placement == (int)ExhibitIconPlacement.Left
-            ? Vector3.Cross(Vector3.up, flat)
-            : -Vector3.Cross(Vector3.up, flat);
-
-        float needed = gap + OverlayWidth * CanvasScale + clearance;  // 여백 + Overlay 전체 폭(본문+버튼 열) + 여백
-
-        float chosenRoom = SidewaysRoom(exhibit, center, extents, chosen, needed, mask);
-        if (chosenRoom < 0f) return;                                  // 막히지 않았습니다.
-
-        float oppositeRoom = SidewaysRoom(exhibit, center, extents, -chosen, needed, mask);
-        string current = placement == (int)ExhibitIconPlacement.Left ? "Left" : "Right";
-        string suggestion = oppositeRoom < 0f
-            ? "반대쪽(" + (current == "Left" ? "Right" : "Left") + ")은 여유가 있습니다"
-            : "반대쪽도 좁습니다 (" + oppositeRoom.ToString("0.00") + "m) — Above 또는 Below 를 쓰세요";
-
-        Debug.LogWarning("[ExhibitDescriptor] " + current + " 쪽 옆 여유가 " + chosenRoom.ToString("0.00") +
-                         "m 뿐이라 Panel(" + needed.ToString("0.00") + "m 필요)이 옆 벽에 물립니다. " +
-                         suggestion + ": " + path, exhibit);
-    }
-
-    /// <summary>
-    /// <paramref name="direction"/> 쪽으로 Panel 이 들어갈 자리가 있는지. 막혔으면 그 거리(m),
-    /// 충분하면 -1 을 돌려줍니다.
-    /// </summary>
-    private static float SidewaysRoom(ExhibitInteractable exhibit, Vector3 center, Vector3 extents,
-                                      Vector3 direction, float needed, int mask)
-    {
-        Transform t = exhibit.transform;
-
-        float halfExtent =
-            Mathf.Abs(Vector3.Dot(direction, t.right)) * extents.x +
-            Mathf.Abs(Vector3.Dot(direction, t.up)) * extents.y +
-            Mathf.Abs(Vector3.Dot(direction, t.forward)) * extents.z;
-
-        Vector3 edge = center + direction * halfExtent;
-
-        RaycastHit hit;
-        if (!Physics.Raycast(edge, direction, out hit, needed, mask, QueryTriggerInteraction.Ignore)) return -1f;
-        return hit.distance;
-    }
-
-    // 폰트 검사용 표본 문자
-    //  KR: 이 패키지는 titleKR / descriptionKR / 기본 Interact 문구가 한국어인 KR 우선 패키지입니다.
-    //  JP: 언어 전환 버튼 라벨이 "日本語" 이고 JP 데이터도 함께 다룹니다.
-    //  기호: 도구가 만드는 버튼 라벨(× ▲ ▼). 사용자가 폰트를 바꿨을 때 여기서 깨지는지 봅니다.
-    private const string GlyphProbeKR = "한글작품설명";
-    private const string GlyphProbeJP = "日本語説明";
-    private const string GlyphProbeSymbol = "×▲▼";
-
-    /// <summary>
-    /// Overlay / 언어 전환 버튼이 실제로 쓰는 TMP 폰트에 한글·일본어·버튼 기호 글리프가 있는지 봅니다.
-    ///
-    /// 폰트를 지정하지 않으면 TMP 기본값(LiberationSans SDF)이 쓰이는데, 여기에는 한글도 일본어도
-    /// 없어 설명이 통째로 □ 로 보입니다. 참조 검사만으로는 절대 드러나지 않는 문제라 함께 봅니다.
-    /// 같은 경고를 100번 찍지 않도록 <b>폰트 1개당 1번만</b> 보고합니다.
-    /// </summary>
-    private static void ValidateFontGlyphs(ExhibitOverlay[] overlays, ExhibitLanguageSwitch[] switches)
-    {
-        List<TMP_Text> texts = new List<TMP_Text>();
-        for (int i = 0; i < overlays.Length; i++) texts.AddRange(overlays[i].GetComponentsInChildren<TMP_Text>(true));
-        for (int i = 0; i < switches.Length; i++) texts.AddRange(switches[i].GetComponentsInChildren<TMP_Text>(true));
-
-        List<TMP_FontAsset> reported = new List<TMP_FontAsset>();
-        bool reportedMissingAsset = false;
-
-        for (int i = 0; i < texts.Count; i++)
-        {
-            TMP_Text text = texts[i];
-            if (text == null) continue;
-
-            // font 가 비어 있으면 TMP 가 기본 폰트로 그립니다. 검사도 같은 기준으로 합니다.
-            TMP_FontAsset font = text.font != null ? text.font : TMP_Settings.defaultFontAsset;
-
-            if (font == null)
-            {
-                if (reportedMissingAsset) continue;
-                reportedMissingAsset = true;
-
-                Debug.LogWarning("[ExhibitDescriptor] TMP 폰트가 지정되지 않았고 TMP 기본 폰트도 없습니다. " +
-                                 "Window > TextMeshPro > Import TMP Essential Resources 를 먼저 실행하세요: " +
-                                 GetPath(text.transform), text);
-                continue;
-            }
-
-            if (reported.Contains(font)) continue;
-            reported.Add(font);
-
-            string missingKR = FindMissingGlyphs(font, GlyphProbeKR);
-            string missingJP = FindMissingGlyphs(font, GlyphProbeJP);
-            string missingSymbol = FindMissingGlyphs(font, GlyphProbeSymbol);
-
-            if (missingKR.Length == 0 && missingJP.Length == 0 && missingSymbol.Length == 0) continue;
-
-            string message = "[ExhibitDescriptor] 폰트 '" + font.name + "' 에 없는 글자가 있어 □ 로 표시됩니다.";
-            if (missingKR.Length > 0) message += "\n - 지정한 폰트에 한글 글리프가 없습니다: " + missingKR;
-            if (missingJP.Length > 0) message += "\n - 일본어 글리프가 없습니다: " + missingJP;
-            if (missingSymbol.Length > 0) message += "\n - 버튼 라벨 기호가 없습니다: " + missingSymbol;
-
-            message += "\nCJK 글리프를 포함한 TMP Font Asset 을 만들어 ExhibitManager 의 " +
-                       "ExhibitDescriptorSettings > 'Overlay Font' 에 지정하고 " +
-                       "Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 다시 실행하세요. " +
-                       "(만드는 방법은 README 의 'CJK 폰트 준비' 참고)" +
-                       "\n예: " + GetPath(text.transform);
-
-            Debug.LogWarning(message, text);
-        }
-    }
-
-    /// <summary>
-    /// <paramref name="probe"/> 의 글자 중 폰트에 없는 것만 모아 돌려줍니다. (없으면 빈 문자열)
-    ///
-    /// fallback 까지 함께 봅니다. TMP 기본 폰트는 ▲▼ 를 본체에 갖고 있지 않지만
-    /// 'LiberationSans SDF - Fallback' 이 대신 그려 주므로 실제로는 정상 표시됩니다.
-    /// 없는 글자를 아틀라스에 새로 추가하지는 않습니다(tryAddCharacter = false). 검사만 해야 하니까요.
-    /// </summary>
-    private static string FindMissingGlyphs(TMP_FontAsset font, string probe)
-    {
-        if (font == null) return probe;
-
-        string missing = "";
-        for (int i = 0; i < probe.Length; i++)
-        {
-            if (font.HasCharacter(probe[i], true, false)) continue;
-            missing += probe[i];
-        }
-
-        return missing;
     }
 
     // =====================================================================

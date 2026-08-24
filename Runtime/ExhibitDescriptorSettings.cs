@@ -39,7 +39,8 @@ public class ExhibitDescriptorSettings : MonoBehaviour
     //    없어 '작품 설명' 이 통째로 □ 로 보입니다. Validate Scene 이 이 상태를 경고합니다.
     [Tooltip("Overlay 와 언어 전환 버튼의 TMP 텍스트에 적용할 폰트입니다. " +
              "한글/일본어를 표시하려면 CJK 글리프를 포함한 TMP Font Asset 을 지정하세요. " +
-             "지정 후 Tools > Exhibit Descriptor > Setup All Exhibits In Scene 을 실행하면 반영됩니다.")]
+             "Tools > Exhibit Descriptor > Exhibit Descriptor 창에서 지정하면 그 자리에서 반영되고, " +
+             "여기서 직접 지정했다면 Setup > All Exhibits In Scene 을 한 번 실행하세요.")]
     public TMP_FontAsset overlayFont;
 
     [Header("Info Icon")]
